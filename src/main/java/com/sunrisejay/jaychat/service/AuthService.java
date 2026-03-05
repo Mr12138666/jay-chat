@@ -1,0 +1,90 @@
+package com.sunrisejay.jaychat.service;
+
+import com.sunrisejay.jaychat.common.exception.BusinessException;
+import com.sunrisejay.jaychat.common.util.JwtUtil;
+import com.sunrisejay.jaychat.dto.request.LoginRequest;
+import com.sunrisejay.jaychat.dto.request.RegisterRequest;
+import com.sunrisejay.jaychat.dto.response.LoginResponse;
+import com.sunrisejay.jaychat.entity.User;
+import com.sunrisejay.jaychat.mapper.UserMapper;
+import org.slf4j.Logger;
+import org.slf4j.LoggerFactory;
+import org.springframework.security.crypto.bcrypt.BCryptPasswordEncoder;
+import org.springframework.security.crypto.password.PasswordEncoder;
+import org.springframework.stereotype.Service;
+import org.springframework.util.StringUtils;
+
+/**
+ * 认证服务
+ * 处理用户注册、登录等业务逻辑
+ */
+@Service
+public class AuthService {
+
+    private static final Logger logger = LoggerFactory.getLogger(AuthService.class);
+
+    private final UserMapper userMapper;
+    private final JwtUtil jwtUtil;
+    private final PasswordEncoder passwordEncoder = new BCryptPasswordEncoder();
+
+    public AuthService(UserMapper userMapper, JwtUtil jwtUtil) {
+        this.userMapper = userMapper;
+        this.jwtUtil = jwtUtil;
+    }
+
+    /**
+     * 用户注册
+     */
+    public void register(RegisterRequest req) {
+        if (!StringUtils.hasText(req.getUsername()) || !StringUtils.hasText(req.getPassword())) {
+            throw new BusinessException("用户名和密码不能为空");
+        }
+        
+        User existing = userMapper.findByUsername(req.getUsername());
+        if (existing != null) {
+            logger.warn("注册失败，用户名已存在: {}", req.getUsername());
+            throw new BusinessException("用户名已存在");
+        }
+        
+        User user = new User();
+        user.setUsername(req.getUsername());
+        user.setPassword(passwordEncoder.encode(req.getPassword()));
+        
+        // 如果昵称为空，使用用户名作为昵称
+        String nickname = req.getNickname();
+        if (nickname == null || nickname.trim().isEmpty()) {
+            nickname = req.getUsername();
+        }
+        user.setNickname(nickname);
+        
+        userMapper.insert(user);
+        logger.info("用户注册成功: {}", req.getUsername());
+    }
+
+    /**
+     * 用户登录
+     */
+    public LoginResponse login(LoginRequest req) {
+        User user = userMapper.findByUsername(req.getUsername());
+        if (user == null) {
+            logger.warn("登录失败，用户不存在: {}", req.getUsername());
+            throw new BusinessException("用户不存在");
+        }
+        
+        if (!passwordEncoder.matches(req.getPassword(), user.getPassword())) {
+            logger.warn("登录失败，密码错误: {}", req.getUsername());
+            throw new BusinessException("密码错误");
+        }
+        
+        String token = jwtUtil.generateToken(user.getId(), user.getUsername());
+        LoginResponse resp = new LoginResponse();
+        resp.setToken(token);
+        
+        // 为了安全，返回前把密码字段置空
+        user.setPassword(null);
+        resp.setUser(user);
+        
+        logger.info("用户登录成功: {}", req.getUsername());
+        return resp;
+    }
+}
