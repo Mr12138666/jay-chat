@@ -4,6 +4,7 @@ import com.sunrisejay.jaychat.common.constant.ApiConstants;
 import com.sunrisejay.jaychat.common.constant.SessionConstants;
 import com.sunrisejay.jaychat.common.converter.MessageConverter;
 import com.sunrisejay.jaychat.common.exception.BusinessException;
+import com.sunrisejay.jaychat.common.util.EmojiUtil;
 import com.sunrisejay.jaychat.dto.request.MessageRequest;
 import com.sunrisejay.jaychat.dto.response.MessageResponse;
 import com.sunrisejay.jaychat.dto.response.SessionMemberResponse;
@@ -39,19 +40,22 @@ public class ChatService {
     private final UserMapper userMapper;
     private final OnlineUserService onlineUserService;
     private final MessageConverter messageConverter;
+    private final EmojiUtil emojiUtil;
 
     public ChatService(ChatMessageMapper messageMapper,
                        ChatSessionMapper sessionMapper,
                        ChatSessionMemberMapper memberMapper,
                        UserMapper userMapper,
                        OnlineUserService onlineUserService,
-                       MessageConverter messageConverter) {
+                       MessageConverter messageConverter,
+                       EmojiUtil emojiUtil) {
         this.messageMapper = messageMapper;
         this.sessionMapper = sessionMapper;
         this.memberMapper = memberMapper;
         this.userMapper = userMapper;
         this.onlineUserService = onlineUserService;
         this.messageConverter = messageConverter;
+        this.emojiUtil = emojiUtil;
     }
 
     /**
@@ -72,11 +76,14 @@ public class ChatService {
             throw new BusinessException("您不在该会话中");
         }
 
+        // 转换表情代码为Unicode表情
+        String content = emojiUtil.convertEmojiCodes(request.getContent());
+        
         // 保存消息
         ChatMessage message = new ChatMessage();
         message.setSessionId(request.getSessionId());
         message.setSenderId(senderId);
-        message.setContent(request.getContent());
+        message.setContent(content);
         message.setContentType(request.getContentType());
         messageMapper.insert(message);
         

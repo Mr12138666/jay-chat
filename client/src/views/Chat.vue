@@ -19,7 +19,10 @@ import { formatTime } from '../utils/date'
 import { getUser, getToken, clearAuth, setUser } from '../utils/storage'
 import { handleApiError, showError, showSuccess } from '../utils/error'
 import MembersModal from '../components/chat/MembersModal.vue'
+import EmojiPicker from '../components/chat/EmojiPicker.vue'
 import { validateAvatarFile, withCacheBuster } from '../utils/avatar'
+import { convertEmojiCodesInText } from '../utils/emoji'
+import { getMessageBackgroundColor } from '../utils/color'
 
 const router = useRouter()
 
@@ -77,6 +80,10 @@ const members = ref<SessionMember[]>([])
 const memberStats = ref<SessionMemberStats | null>(null)
 const onlineUserIds = ref<Set<number>>(new Set())
 const loadingMembers = ref(false)
+
+// 表情选择器相关
+const showEmojiPicker = ref(false)
+const emojiPickerRef = ref<HTMLElement | null>(null)
 
 // 加载会话列表
 const loadSessions = async () => {
@@ -229,6 +236,7 @@ const switchSession = async (sessionId: number) => {
 const sendMessage = () => {
   if (!inputMessage.value.trim() || !currentSessionId.value) return
   
+  // 发送原始内容（包含表情代码），后端会自动转换
   const success = wsService.sendMessage(
     currentSessionId.value,
     inputMessage.value.trim(),
@@ -237,10 +245,41 @@ const sendMessage = () => {
   
   if (success) {
     inputMessage.value = ''
+    showEmojiPicker.value = false
   } else {
     console.error('发送消息失败，WebSocket 未连接')
   }
 }
+
+// 表情选择器相关
+const toggleEmojiPicker = () => {
+  showEmojiPicker.value = !showEmojiPicker.value
+}
+
+const closeEmojiPicker = () => {
+  showEmojiPicker.value = false
+}
+
+const selectEmoji = (code: string) => {
+  // 在光标位置插入表情代码，如果没有光标则在末尾插入
+  const input = inputMessage.value
+  const cursorPos = (document.querySelector('.message-input') as HTMLInputElement)?.selectionStart || input.length
+  
+  inputMessage.value = input.slice(0, cursorPos) + code + input.slice(cursorPos)
+  showEmojiPicker.value = false
+  
+  // 聚焦输入框
+  nextTick(() => {
+    const inputEl = document.querySelector('.message-input') as HTMLInputElement
+    if (inputEl) {
+      inputEl.focus()
+      const newPos = cursorPos + code.length
+      inputEl.setSelectionRange(newPos, newPos)
+    }
+  })
+}
+
+// 注意：getMessageBackgroundColor 已从 utils/color 导入，直接使用即可
 
 // 处理接收到的消息
 const handleMessage = async (message: ChatMessage) => {
@@ -278,10 +317,13 @@ const handleMessage = async (message: ChatMessage) => {
       }
     }
     
+    // 确保表情代码被转换（双重保障，后端已经转换了）
+    const displayContent = convertEmojiCodesInText(message.content)
+    
     messages.value.push({
       id: message.id || Date.now(),
       sender: senderName,
-      content: message.content,
+      content: displayContent,
       time: formatTime(message.sentAt),
       senderId: message.senderId,
       senderAvatar
@@ -792,7 +834,13 @@ onUnmounted(() => {
                 <span class="sender">{{ msg.sender }}</span>
                 <span class="time">{{ msg.time }}</span>
               </div>
-              <div class="message-content">
+              <div 
+                class="message-content"
+                :style="msg.senderId !== currentUser?.id ? { 
+                  backgroundColor: getMessageBackgroundColor(msg.senderId),
+                  color: '#ffffff'
+                } : {}"
+              >
                 {{ msg.content }}
               </div>
             </div>
@@ -804,14 +852,32 @@ onUnmounted(() => {
       </section>
 
       <footer class="chat-input" v-if="currentSessionId">
-        <input
-          v-model="inputMessage"
-          @keyup.enter="sendMessage"
-          type="text"
-          placeholder="输入消息..."
-          class="message-input"
-          :disabled="!wsConnected"
-        />
+        <div class="input-wrapper" style="position: relative;">
+          <button 
+            @click="toggleEmojiPicker"
+            class="emoji-btn"
+            type="button"
+            :disabled="!wsConnected"
+            title="表情"
+          >
+            😊
+          </button>
+          <EmojiPicker 
+            v-if="showEmojiPicker"
+            :show="showEmojiPicker"
+            @select="selectEmoji"
+            @close="closeEmojiPicker"
+          />
+          <input
+            v-model="inputMessage"
+            @keyup.enter="sendMessage"
+            @click="showEmojiPicker = false"
+            type="text"
+            placeholder="输入消息..."
+            class="message-input"
+            :disabled="!wsConnected"
+          />
+        </div>
         <button 
           @click="sendMessage" 
           class="send-btn"
@@ -1271,20 +1337,59 @@ onUnmounted(() => {
   display: flex;
   flex-direction: row;
   gap: 12px;
-  max-width: 75%;
+  max-width: 70%;
+  min-width: 0;
+  width: fit-content;
+  align-items: flex-start;
   animation: messageSlideIn 0.3s ease-out;
+}
+
+/* 让他人消息的消息内容与头像顶部对齐 */
+.message:not(.own-message) {
+  align-items: flex-start;
+}
+
+/* 让他人消息的 message-body 整体上移，使消息框与头像顶部对齐 */
+.message:not(.own-message) .message-body {
+  gap: 4px;
+  margin-top: -18px; /* 上移 message-body，使消息框与头像顶部对齐 */
+}
+
+/* 补偿 margin-top 的影响，统一消息之间的间距 */
+.message:not(.own-message) {
+  margin-bottom: 18px; /* 补偿 message-body 的 margin-top，保持与自己的消息间距一致 */
+}
+
+.message:not(.own-message) .message-meta {
+  margin-bottom: 1px;
+  height: 16px;
+  line-height: 16px;
+  font-size: 12px;
 }
 
 .message.own-message {
   flex-direction: row-reverse;
   align-self: flex-end;
+  margin-left: auto;
+  align-items: flex-end;
+  justify-content: flex-end;
 }
 
 .message-body {
   display: flex;
   flex-direction: column;
-  gap: 6px;
+  gap: 4px;
   flex: 1;
+  min-width: 0;
+  justify-content: flex-start;
+  align-items: flex-start;
+}
+
+
+.message.own-message .message-body {
+  flex: 0 1 auto;
+  align-items: flex-end;
+  max-width: 100%;
 }
 
 @keyframes messageSlideIn {
@@ -1364,13 +1469,15 @@ onUnmounted(() => {
   line-height: 1.5;
   word-wrap: break-word;
   word-break: break-word;
-  box-shadow: 0 2px 4px rgba(0, 0, 0, 0.1);
+  box-shadow: 0 2px 4px rgba(0, 0, 0, 0.15);
+  display: inline-block;
+  max-width: 100%;
+  width: fit-content;
+  min-width: 0;
+  white-space: pre-wrap;
 }
 
-.message.own-message {
-  align-items: flex-end;
-  align-self: flex-end;
-}
+/* 自己的消息样式已在上面定义，这里删除重复定义 */
 
 .message.own-message .message-content {
   background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
@@ -1380,6 +1487,12 @@ onUnmounted(() => {
 
 .message:not(.own-message) .message-content {
   border-bottom-left-radius: 4px;
+  margin-top: 0;
+}
+
+/* 让他人消息的消息内容与头像顶部对齐 */
+.message:not(.own-message) .message-body {
+  padding-top: 0;
 }
 
 .loading, .empty-messages, .empty-state {
@@ -1407,6 +1520,42 @@ onUnmounted(() => {
   background: #252525;
   display: flex;
   gap: 12px;
+  align-items: center;
+}
+
+.input-wrapper {
+  flex: 1;
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  position: relative;
+}
+
+.emoji-btn {
+  width: 40px;
+  height: 40px;
+  padding: 0;
+  background: #1a1a1a;
+  border: 1px solid #333;
+  border-radius: 6px;
+  color: #e0e0e0;
+  font-size: 20px;
+  cursor: pointer;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  transition: all 0.2s;
+  flex-shrink: 0;
+}
+
+.emoji-btn:hover:not(:disabled) {
+  background: #2a2a2a;
+  border-color: #667eea;
+}
+
+.emoji-btn:disabled {
+  opacity: 0.5;
+  cursor: not-allowed;
 }
 
 .message-input {
@@ -1490,6 +1639,7 @@ onUnmounted(() => {
 
   .message {
     max-width: 85%;
+    min-width: 0;
   }
 
   .message-content {
@@ -1500,6 +1650,16 @@ onUnmounted(() => {
   .chat-input {
     padding: 12px 16px;
     gap: 8px;
+  }
+
+  .input-wrapper {
+    gap: 6px;
+  }
+
+  .emoji-btn {
+    width: 36px;
+    height: 36px;
+    font-size: 18px;
   }
 
   .message-input {
