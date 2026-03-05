@@ -2,6 +2,8 @@
 import { ref } from 'vue'
 import { useRouter } from 'vue-router'
 import { login, register, type LoginRequest, type RegisterRequest } from '../api/auth'
+import { setToken, setUser } from '../utils/storage'
+import { handleApiError } from '../utils/error'
 
 const router = useRouter()
 
@@ -41,18 +43,14 @@ const handleLogin = async () => {
 
   try {
     const res = await login(loginForm.value)
-    // 保存 token 和用户信息
-    localStorage.setItem('token', res.token)
-    localStorage.setItem('user', JSON.stringify(res.user))
+    // 保存token和用户信息
+    setToken(res.token)
+    setUser(res.user)
     // 跳转到聊天室
     router.push('/chat')
   } catch (error: any) {
     console.error('登录错误:', error)
-    if (error.message?.includes('Network Error') || error.message?.includes('timeout')) {
-      errorMsg.value = '无法连接到服务器，请确认后端服务已启动（http://localhost:8080）'
-    } else {
-      errorMsg.value = error.message || '登录失败，请检查用户名和密码'
-    }
+    errorMsg.value = handleApiError(error)
   } finally {
     loading.value = false
   }
@@ -75,16 +73,12 @@ const handleRegister = async () => {
       username: registerForm.value.username,
       password: registerForm.value.password
     })
-    localStorage.setItem('token', res.token)
-    localStorage.setItem('user', JSON.stringify(res.user))
+    setToken(res.token)
+    setUser(res.user)
     router.push('/chat')
   } catch (error: any) {
     console.error('注册错误:', error)
-    if (error.message?.includes('Network Error') || error.message?.includes('timeout')) {
-      errorMsg.value = '无法连接到服务器，请确认后端服务已启动（http://localhost:8080）'
-    } else {
-      errorMsg.value = error.message || '注册失败，用户名可能已存在'
-    }
+    errorMsg.value = handleApiError(error)
   } finally {
     loading.value = false
   }

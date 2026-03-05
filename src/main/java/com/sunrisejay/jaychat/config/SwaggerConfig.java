@@ -8,10 +8,14 @@ import springfox.documentation.builders.RequestHandlerSelectors;
 import springfox.documentation.service.ApiInfo;
 import springfox.documentation.spi.DocumentationType;
 import springfox.documentation.spring.web.plugins.Docket;
-import springfox.documentation.swagger2.annotations.EnableSwagger2WebMvc;
 
+/**
+ * Swagger/Knife4j配置
+ * 注意：@EnableSwagger2WebMvc已废弃，但Springfox 3.0.0仍需要它
+ * 如需升级，可考虑迁移到springdoc-openapi
+ */
 @Configuration
-@EnableSwagger2WebMvc
+@springfox.documentation.swagger2.annotations.EnableSwagger2WebMvc
 public class SwaggerConfig {
 
     @Bean

@@ -4,6 +4,9 @@ import { useRouter } from 'vue-router'
 import type { UserInfo } from '../api/auth'
 import { getSessions, getMessages, getOrCreateDefaultSession, type ChatSession } from '../api/chat'
 import { wsService, type ChatMessage } from '../utils/websocket'
+import { formatTime } from '../utils/date'
+import { getUser, getToken, clearAuth } from '../utils/storage'
+import { handleApiError, showError } from '../utils/error'
 
 const router = useRouter()
 
@@ -30,19 +33,12 @@ const loading = ref(false)
 // WebSocket 连接状态（响应式）
 const wsConnected = ref(false)
 
-// 格式化时间
-const formatTime = (dateStr?: string) => {
-  if (!dateStr) return '刚刚'
-  const date = new Date(dateStr)
-  const now = new Date()
-  const diff = now.getTime() - date.getTime()
-  const minutes = Math.floor(diff / 60000)
-  
-  if (minutes < 1) return '刚刚'
-  if (minutes < 60) return `${minutes}分钟前`
-  if (minutes < 1440) return `${Math.floor(minutes / 60)}小时前`
-  return date.toLocaleDateString()
-}
+// 消息容器引用
+const messagesContainer = ref<HTMLElement | null>(null)
+
+// 移动端侧边栏显示状态
+const showSidebar = ref(false)
+
 
 // 加载会话列表
 const loadSessions = async () => {
@@ -80,25 +76,30 @@ const loadSessions = async () => {
     }
   } catch (error: any) {
     console.error('加载会话列表失败:', error)
+    const errorMessage = handleApiError(error)
+    
     // 如果获取会话列表失败，尝试直接创建默认会话
-    if (error.message?.includes('401') || error.message?.includes('未登录')) {
-      alert('登录已过期，请重新登录')
+    if (errorMessage.includes('登录已过期') || errorMessage.includes('未登录')) {
+      showError('登录已过期，请重新登录')
+      clearAuth()
       router.push('/login')
-    } else {
-      console.log('尝试直接创建默认会话...')
-      try {
-        const defaultSession = await getOrCreateDefaultSession()
-        sessions.value = [defaultSession]
-        currentSessionId.value = defaultSession.id
-        wsService.setCurrentSessionId(defaultSession.id)
-        await loadMessages(defaultSession.id)
-        if (wsConnected.value || wsService.isConnected()) {
-          wsService.subscribeToSession(defaultSession.id, handleMessage)
-        }
-      } catch (createError) {
-        console.error('创建默认会话也失败:', createError)
-        alert('无法加载会话，请检查网络连接或刷新页面')
+      return
+    }
+    
+    // 尝试直接创建默认会话
+    console.log('尝试直接创建默认会话...')
+    try {
+      const defaultSession = await getOrCreateDefaultSession()
+      sessions.value = [defaultSession]
+      currentSessionId.value = defaultSession.id
+      wsService.setCurrentSessionId(defaultSession.id)
+      await loadMessages(defaultSession.id)
+      if (wsConnected.value || wsService.isConnected()) {
+        wsService.subscribeToSession(defaultSession.id, handleMessage)
       }
+    } catch (createError) {
+      console.error('创建默认会话也失败:', createError)
+      showError('无法加载会话，请检查网络连接或刷新页面')
     }
   }
 }
@@ -119,6 +120,8 @@ const loadMessages = async (sessionId: number) => {
     // 滚动到底部
     await nextTick()
     scrollToBottom()
+    // 延迟再次滚动，确保DOM完全渲染
+    setTimeout(() => scrollToBottom(), 100)
   } catch (error) {
     console.error('加载消息失败:', error)
   } finally {
@@ -131,6 +134,12 @@ const switchSession = async (sessionId: number) => {
   if (currentSessionId.value === sessionId) return
   currentSessionId.value = sessionId
   wsService.setCurrentSessionId(sessionId)
+  
+  // 移动端切换会话后关闭侧边栏
+  if (window.innerWidth <= 768) {
+    showSidebar.value = false
+  }
+  
   await loadMessages(sessionId)
   // 订阅新会话的消息
   if (wsConnected.value || wsService.isConnected()) {
@@ -197,7 +206,7 @@ const handleMessage = (message: ChatMessage) => {
     })
     
     nextTick(() => {
-      scrollToBottom()
+      scrollToBottom(true) // 新消息使用平滑滚动
     })
   } else {
     console.warn('消息会话ID不匹配，跳过:', {
@@ -207,34 +216,46 @@ const handleMessage = (message: ChatMessage) => {
   }
 }
 
-// 滚动到底部
-const scrollToBottom = () => {
-  const messagesEl = document.querySelector('.chat-messages')
-  if (messagesEl) {
-    messagesEl.scrollTop = messagesEl.scrollHeight
+// 滚动到底部（平滑滚动）
+const scrollToBottom = (smooth = false) => {
+  if (messagesContainer.value) {
+    if (smooth) {
+      messagesContainer.value.scrollTo({
+        top: messagesContainer.value.scrollHeight,
+        behavior: 'smooth'
+      })
+    } else {
+      messagesContainer.value.scrollTop = messagesContainer.value.scrollHeight
+    }
   }
+}
+
+// 切换移动端侧边栏
+const toggleSidebar = () => {
+  showSidebar.value = !showSidebar.value
 }
 
 // 退出登录
 const handleLogout = () => {
   wsService.disconnect()
-  localStorage.removeItem('token')
-  localStorage.removeItem('user')
+  clearAuth()
   router.push('/login')
 }
 
 onMounted(async () => {
-  // 从 localStorage 读取用户信息
-  const userStr = localStorage.getItem('user')
-  const token = localStorage.getItem('token')
+  // 从本地存储读取用户信息和Token
+  const user = getUser<UserInfo>()
+  const token = getToken()
   
-  if (!userStr || !token) {
+  if (!user || !token) {
     router.push('/login')
     return
   }
   
-  // 解析并更新当前用户信息
-  const user = JSON.parse(userStr)
+  // 添加窗口大小变化监听
+  window.addEventListener('resize', handleResize)
+  
+  // 更新当前用户信息
   currentUser.value = user
   console.log('当前登录用户:', user)
   
@@ -243,6 +264,11 @@ onMounted(async () => {
   
   // 先加载会话列表（这样可以在 WebSocket 连接成功后立即订阅）
   await loadSessions()
+  
+  // 确保消息滚动到底部（延迟执行，确保DOM完全渲染）
+  setTimeout(() => {
+    scrollToBottom()
+  }, 300)
   
   // 设置连接状态变更回调
   wsService.onConnectionStateChange((connected) => {
@@ -255,8 +281,8 @@ onMounted(async () => {
   wsService.connect(token, handleMessage, (error) => {
     console.error('WebSocket 连接错误:', error)
     wsConnected.value = false
-    // 连接失败时，可以显示错误提示
-    alert('WebSocket 连接失败，请检查网络或刷新页面重试')
+    // 连接失败时，显示错误提示
+    showError('WebSocket 连接失败，请检查网络或刷新页面重试')
   })
   
   // 初始化连接状态
@@ -282,7 +308,16 @@ onMounted(async () => {
   }, 500)
 })
 
+// 监听窗口大小变化，自动关闭移动端侧边栏
+const handleResize = () => {
+  if (window.innerWidth > 768) {
+    showSidebar.value = false
+  }
+}
+
 onUnmounted(() => {
+  // 移除窗口大小变化监听
+  window.removeEventListener('resize', handleResize)
   // 断开 WebSocket 连接
   wsService.disconnect()
 })
@@ -290,7 +325,23 @@ onUnmounted(() => {
 
 <template>
   <div class="app">
-    <aside class="sidebar">
+    <!-- 移动端遮罩层 -->
+    <div 
+      v-if="showSidebar" 
+      class="sidebar-overlay"
+      @click="showSidebar = false"
+    ></div>
+    
+    <!-- 移动端菜单按钮 -->
+    <button class="mobile-menu-btn" @click="toggleSidebar">
+      <svg width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+        <line x1="3" y1="6" x2="21" y2="6"></line>
+        <line x1="3" y1="12" x2="21" y2="12"></line>
+        <line x1="3" y1="18" x2="21" y2="18"></line>
+      </svg>
+    </button>
+    
+    <aside class="sidebar" :class="{ 'sidebar-open': showSidebar }">
       <header class="sidebar-header">
         <h1>jay-chat</h1>
         <p class="subtitle">大型聊天室</p>
@@ -324,16 +375,23 @@ onUnmounted(() => {
 
     <main class="chat">
       <header class="chat-header">
-        <div>
+        <div class="chat-header-content">
           <h2>{{ currentSessionId ? (sessions.find(s => s.id === currentSessionId)?.name || '聊天') : '请选择会话' }}</h2>
-          <p class="chat-subtitle">{{ wsConnected ? '已连接' : '连接中...' }}</p>
+          <p class="chat-subtitle">
+            <span class="status-dot" :class="{ 'connected': wsConnected }"></span>
+            {{ wsConnected ? '已连接' : '连接中...' }}
+          </p>
         </div>
       </header>
 
-      <section class="chat-messages" v-if="currentSessionId">
+      <section 
+        ref="messagesContainer"
+        class="chat-messages" 
+        v-if="currentSessionId"
+      >
         <div v-if="loading" class="loading">加载中...</div>
         <div v-else-if="messages.length === 0" class="empty-messages">暂无消息</div>
-        <div v-else>
+        <div v-else class="messages-list">
           <div 
             v-for="msg in messages" 
             :key="msg.id" 
@@ -381,6 +439,49 @@ onUnmounted(() => {
   height: 100vh;
   background: #1a1a1a;
   color: #e0e0e0;
+  position: relative;
+  overflow: hidden;
+}
+
+/* 移动端菜单按钮 */
+.mobile-menu-btn {
+  display: none;
+  position: fixed;
+  top: 16px;
+  left: 16px;
+  z-index: 1001;
+  width: 40px;
+  height: 40px;
+  border-radius: 8px;
+  background: #252525;
+  border: 1px solid #333;
+  color: #e0e0e0;
+  cursor: pointer;
+  align-items: center;
+  justify-content: center;
+  transition: all 0.3s;
+}
+
+.mobile-menu-btn:hover {
+  background: #2a2a2a;
+}
+
+.mobile-menu-btn svg {
+  width: 20px;
+  height: 20px;
+}
+
+/* 移动端遮罩层 */
+.sidebar-overlay {
+  display: none;
+  position: fixed;
+  top: 0;
+  left: 0;
+  right: 0;
+  bottom: 0;
+  background: rgba(0, 0, 0, 0.5);
+  z-index: 999;
+  backdrop-filter: blur(2px);
 }
 
 .sidebar {
@@ -389,6 +490,9 @@ onUnmounted(() => {
   border-right: 1px solid #333;
   display: flex;
   flex-direction: column;
+  transition: transform 0.3s ease;
+  z-index: 1000;
+  position: relative;
 }
 
 .sidebar-header {
@@ -517,36 +621,89 @@ onUnmounted(() => {
 }
 
 .chat-header {
-  padding: 20px;
+  padding: 16px 20px;
   border-bottom: 1px solid #333;
   background: #252525;
+  position: sticky;
+  top: 0;
+  z-index: 100;
+  backdrop-filter: blur(10px);
+  background: rgba(37, 37, 37, 0.95);
+}
+
+.chat-header-content {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
 }
 
 .chat-header h2 {
-  margin: 0 0 4px 0;
-  font-size: 20px;
+  margin: 0;
+  font-size: 18px;
   color: #fff;
+  font-weight: 600;
 }
 
 .chat-subtitle {
   margin: 0;
   font-size: 12px;
   color: #999;
+  display: flex;
+  align-items: center;
+  gap: 6px;
+}
+
+.status-dot {
+  width: 8px;
+  height: 8px;
+  border-radius: 50%;
+  background: #666;
+  display: inline-block;
+  transition: background 0.3s;
+}
+
+.status-dot.connected {
+  background: #4ade80;
+  box-shadow: 0 0 8px rgba(74, 222, 128, 0.5);
 }
 
 .chat-messages {
   flex: 1;
   overflow-y: auto;
+  overflow-x: hidden;
   padding: 20px;
   display: flex;
   flex-direction: column;
   gap: 16px;
+  scroll-behavior: smooth;
+  /* 优化滚动性能 */
+  -webkit-overflow-scrolling: touch;
+}
+
+.messages-list {
+  display: flex;
+  flex-direction: column;
+  gap: 16px;
+  min-height: min-content;
 }
 
 .message {
   display: flex;
   flex-direction: column;
-  gap: 4px;
+  gap: 6px;
+  max-width: 75%;
+  animation: messageSlideIn 0.3s ease-out;
+}
+
+@keyframes messageSlideIn {
+  from {
+    opacity: 0;
+    transform: translateY(10px);
+  }
+  to {
+    opacity: 1;
+    transform: translateY(0);
+  }
 }
 
 .message-meta {
@@ -567,21 +724,29 @@ onUnmounted(() => {
 }
 
 .message-content {
-  padding: 8px 12px;
+  padding: 10px 14px;
   background: #2a2a2a;
-  border-radius: 6px;
+  border-radius: 12px;
   font-size: 14px;
   line-height: 1.5;
   word-wrap: break-word;
+  word-break: break-word;
+  box-shadow: 0 2px 4px rgba(0, 0, 0, 0.1);
 }
 
 .message.own-message {
   align-items: flex-end;
+  align-self: flex-end;
 }
 
 .message.own-message .message-content {
   background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
   color: white;
+  border-bottom-right-radius: 4px;
+}
+
+.message:not(.own-message) .message-content {
+  border-bottom-left-radius: 4px;
 }
 
 .loading, .empty-messages, .empty-state {
@@ -638,7 +803,161 @@ onUnmounted(() => {
   transition: opacity 0.2s;
 }
 
-.send-btn:hover {
+.send-btn:hover:not(:disabled) {
   opacity: 0.9;
+  transform: translateY(-1px);
+  box-shadow: 0 4px 12px rgba(102, 126, 234, 0.4);
+}
+
+.send-btn:active:not(:disabled) {
+  transform: translateY(0);
+}
+
+/* 响应式设计 - 移动端 */
+@media (max-width: 768px) {
+  .mobile-menu-btn {
+    display: flex;
+  }
+
+  .sidebar-overlay {
+    display: block;
+  }
+
+  .sidebar {
+    position: fixed;
+    top: 0;
+    left: 0;
+    bottom: 0;
+    width: 280px;
+    transform: translateX(-100%);
+    box-shadow: 2px 0 8px rgba(0, 0, 0, 0.3);
+  }
+
+  .sidebar.sidebar-open {
+    transform: translateX(0);
+  }
+
+  .chat {
+    width: 100%;
+  }
+
+  .chat-header {
+    padding: 12px 16px;
+    padding-left: 60px;
+  }
+
+  .chat-header h2 {
+    font-size: 16px;
+  }
+
+  .chat-messages {
+    padding: 16px;
+    gap: 12px;
+  }
+
+  .message {
+    max-width: 85%;
+  }
+
+  .message-content {
+    padding: 8px 12px;
+    font-size: 14px;
+  }
+
+  .chat-input {
+    padding: 12px 16px;
+    gap: 8px;
+  }
+
+  .message-input {
+    padding: 10px;
+    font-size: 14px;
+  }
+
+  .send-btn {
+    padding: 10px 20px;
+    font-size: 14px;
+  }
+
+  .user-info {
+    padding: 12px 16px;
+  }
+
+  .sidebar-header {
+    padding: 16px;
+  }
+
+  .sidebar-header h1 {
+    font-size: 20px;
+  }
+}
+
+/* 响应式设计 - 小屏手机 */
+@media (max-width: 480px) {
+  .sidebar {
+    width: 100%;
+  }
+
+  .message {
+    max-width: 90%;
+  }
+
+  .chat-header {
+    padding-left: 56px;
+  }
+}
+
+/* 滚动条样式优化 */
+.chat-messages::-webkit-scrollbar,
+.room-list::-webkit-scrollbar {
+  width: 6px;
+}
+
+.chat-messages::-webkit-scrollbar-track,
+.room-list::-webkit-scrollbar-track {
+  background: transparent;
+}
+
+.chat-messages::-webkit-scrollbar-thumb,
+.room-list::-webkit-scrollbar-thumb {
+  background: #444;
+  border-radius: 3px;
+}
+
+.chat-messages::-webkit-scrollbar-thumb:hover,
+.room-list::-webkit-scrollbar-thumb:hover {
+  background: #555;
+}
+
+/* 输入框聚焦动画 */
+.message-input:focus {
+  transform: scale(1.01);
+  transition: all 0.2s;
+}
+
+/* 加载动画 */
+.loading {
+  position: relative;
+}
+
+.loading::after {
+  content: '';
+  position: absolute;
+  width: 20px;
+  height: 20px;
+  top: 50%;
+  left: 50%;
+  margin-left: -10px;
+  margin-top: -10px;
+  border: 2px solid #444;
+  border-top-color: #667eea;
+  border-radius: 50%;
+  animation: spin 0.8s linear infinite;
+}
+
+@keyframes spin {
+  to {
+    transform: rotate(360deg);
+  }
 }
 </style>

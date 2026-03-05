@@ -1,5 +1,6 @@
 import axios from 'axios'
 import type { AxiosInstance, InternalAxiosRequestConfig, AxiosResponse } from 'axios'
+import { getToken, clearAuth } from '../utils/storage'
 
 // 创建 axios 实例
 // 支持环境变量配置，开发环境使用 localhost，生产环境使用实际服务器地址
@@ -14,10 +15,10 @@ const request: AxiosInstance = axios.create({
   }
 })
 
-// 请求拦截器：自动添加 JWT token
+// 请求拦截器：自动添加JWT token
 request.interceptors.request.use(
   (config: InternalAxiosRequestConfig) => {
-    const token = localStorage.getItem('token')
+    const token = getToken()
     if (token && config.headers) {
       config.headers.Authorization = `Bearer ${token}`
     }
@@ -41,18 +42,17 @@ request.interceptors.response.use(
     }
   },
   (error: any) => {
-    // HTTP 错误（401 未授权等）
+    // HTTP错误（401未授权等）
     if (error.response?.status === 401) {
-      // token 过期或无效，清除本地 token，跳转到登录页
-      localStorage.removeItem('token')
-      localStorage.removeItem('user')
+      // token过期或无效，清除本地认证信息，跳转到登录页
+      clearAuth()
       if (window.location.pathname !== '/login') {
         window.location.href = '/login'
       }
     } else if (error.code === 'ECONNABORTED' || error.message?.includes('timeout')) {
       console.error('请求超时，请检查后端服务是否启动')
     } else if (error.message?.includes('Network Error')) {
-      console.error('网络错误，请检查后端服务是否启动在 http://localhost:8080')
+      console.error('网络错误，请检查后端服务是否启动')
     }
     return Promise.reject(error)
   }
