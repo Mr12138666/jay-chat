@@ -39,3 +39,12 @@ export function showError(message: string): void {
   console.error(message)
   alert(message)
 }
+
+/**
+ * 显示成功提示
+ */
+export function showSuccess(message: string): void {
+  // 可以集成消息提示组件，这里先用alert
+  console.log(message)
+  alert(message)
+}

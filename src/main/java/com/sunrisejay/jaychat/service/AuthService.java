@@ -14,6 +14,8 @@ import org.springframework.security.crypto.password.PasswordEncoder;
 import org.springframework.stereotype.Service;
 import org.springframework.util.StringUtils;
 
+import javax.validation.constraints.NotBlank;
+
 /**
  * 认证服务
  * 处理用户注册、登录等业务逻辑
@@ -86,5 +88,24 @@ public class AuthService {
         
         logger.info("用户登录成功: {}", req.getUsername());
         return resp;
+    }
+
+    public void updateNickname(Long userId, @NotBlank(message = "昵称不能为空") String nickname) {
+        if(!StringUtils.hasText(nickname)) {
+            throw new BusinessException("昵称不能为空");
+        }
+        User user = userMapper.selectById(userId);
+        if (user == null) {
+            logger.warn("更新昵称失败，用户不存在: userId={}", userId);
+            throw new BusinessException("用户不存在");
+        }
+        int result = userMapper.updateNickname(userId, nickname);
+        if (result == 0) {
+            logger.warn("更新昵称失败，数据库操作未成功: userId={}", userId);
+            throw new BusinessException("更新昵称失败");
+        }
+        logger.info("用户昵称更新成功: userId={}, newNickname={}", userId, nickname);
+
+
     }
 }

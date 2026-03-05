@@ -4,6 +4,8 @@ import com.sunrisejay.jaychat.entity.User;
 import org.apache.ibatis.annotations.Mapper;
 import org.apache.ibatis.annotations.Param;
 
+import javax.validation.constraints.NotBlank;
+
 /**
  * 用户数据访问层
  */
@@ -24,4 +26,6 @@ public interface UserMapper {
      * 插入用户
      */
     int insert(User user);
+
+    int updateNickname(@Param("id") Long id, @Param("nickname") String nickname);
 }

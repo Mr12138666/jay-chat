@@ -2,11 +2,22 @@
 import { ref, onMounted, onUnmounted, nextTick } from 'vue'
 import { useRouter } from 'vue-router'
 import type { UserInfo } from '../api/auth'
-import { getSessions, getMessages, getOrCreateDefaultSession, type ChatSession } from '../api/chat'
+import { updateNickname } from '../api/auth'
+import { 
+  getSessions, 
+  getMessages, 
+  getOrCreateDefaultSession, 
+  getSessionMembers,
+  getSessionMemberStats,
+  getOnlineUserIds,
+  type ChatSession,
+  type SessionMember,
+  type SessionMemberStats
+} from '../api/chat'
 import { wsService, type ChatMessage } from '../utils/websocket'
 import { formatTime } from '../utils/date'
-import { getUser, getToken, clearAuth } from '../utils/storage'
-import { handleApiError, showError } from '../utils/error'
+import { getUser, getToken, clearAuth, setUser } from '../utils/storage'
+import { handleApiError, showError, showSuccess } from '../utils/error'
 
 const router = useRouter()
 
@@ -38,6 +49,18 @@ const messagesContainer = ref<HTMLElement | null>(null)
 
 // 移动端侧边栏显示状态
 const showSidebar = ref(false)
+
+// 修改昵称相关
+const showEditNickname = ref(false)
+const newNickname = ref('')
+const updatingNickname = ref(false)
+
+// 群成员列表相关
+const showMembersList = ref(false)
+const members = ref<SessionMember[]>([])
+const memberStats = ref<SessionMemberStats | null>(null)
+const onlineUserIds = ref<Set<number>>(new Set())
+const loadingMembers = ref(false)
 
 
 // 加载会话列表
@@ -132,6 +155,10 @@ const loadMessages = async (sessionId: number) => {
   // 切换会话
 const switchSession = async (sessionId: number) => {
   if (currentSessionId.value === sessionId) return
+  
+  // 停止旧会话的统计刷新
+  stopMemberStatsRefresh()
+  
   currentSessionId.value = sessionId
   wsService.setCurrentSessionId(sessionId)
   
@@ -145,6 +172,10 @@ const switchSession = async (sessionId: number) => {
   if (wsConnected.value || wsService.isConnected()) {
     wsService.subscribeToSession(sessionId, handleMessage)
   }
+  
+  // 加载新会话的成员统计
+  await loadMembersData()
+  startMemberStatsRefresh()
 }
 
 // 发送消息
@@ -242,6 +273,134 @@ const handleLogout = () => {
   router.push('/login')
 }
 
+// 打开修改昵称弹窗
+const openEditNickname = () => {
+  newNickname.value = currentUser.value?.nickname || ''
+  showEditNickname.value = true
+}
+
+// 关闭修改昵称弹窗
+const closeEditNickname = () => {
+  showEditNickname.value = false
+  newNickname.value = ''
+}
+
+// 保存昵称
+const saveNickname = async () => {
+  const nickname = newNickname.value.trim()
+  
+  if (!nickname) {
+    showError('昵称不能为空')
+    return
+  }
+  
+  if (nickname === currentUser.value?.nickname) {
+    closeEditNickname()
+    return
+  }
+  
+  updatingNickname.value = true
+  
+  try {
+    await updateNickname({ nickname })
+    
+    // 更新本地存储的用户信息
+    if (currentUser.value) {
+      currentUser.value.nickname = nickname
+      setUser(currentUser.value)
+    }
+    
+    showSuccess('昵称修改成功')
+    closeEditNickname()
+  } catch (error: any) {
+    const errorMessage = handleApiError(error)
+    showError(errorMessage)
+  } finally {
+    updatingNickname.value = false
+  }
+}
+
+// 打开成员列表
+const openMembersList = async () => {
+  if (!currentSessionId.value) return
+  
+  showMembersList.value = true
+  await loadMembersData()
+}
+
+// 关闭成员列表
+const closeMembersList = () => {
+  showMembersList.value = false
+}
+
+// 加载成员数据
+const loadMembersData = async () => {
+  if (!currentSessionId.value) return
+  
+  loadingMembers.value = true
+  try {
+    // 并行加载成员列表、统计和在线用户
+    const [membersData, statsData, onlineIds] = await Promise.all([
+      getSessionMembers(currentSessionId.value),
+      getSessionMemberStats(currentSessionId.value),
+      getOnlineUserIds(currentSessionId.value)
+    ])
+    
+    members.value = membersData
+    memberStats.value = statsData
+    onlineUserIds.value = new Set(onlineIds)
+  } catch (error: any) {
+    console.error('加载成员数据失败:', error)
+    const errorMessage = handleApiError(error)
+    showError(errorMessage)
+  } finally {
+    loadingMembers.value = false
+  }
+}
+
+// 检查用户是否在线
+const isUserOnline = (userId: number): boolean => {
+  return onlineUserIds.value.has(userId)
+}
+
+// 获取当前会话的统计信息（用于标题显示）
+const getCurrentSessionStats = () => {
+  if (!currentSessionId.value || !memberStats.value) {
+    return null
+  }
+  return memberStats.value
+}
+
+// 定期刷新成员统计（每30秒）
+let memberStatsInterval: number | null = null
+
+const startMemberStatsRefresh = () => {
+  if (memberStatsInterval) {
+    clearInterval(memberStatsInterval)
+  }
+  
+  memberStatsInterval = window.setInterval(async () => {
+    if (currentSessionId.value && !showMembersList.value) {
+      // 只刷新统计，不刷新完整列表（节省资源）
+      try {
+        const stats = await getSessionMemberStats(currentSessionId.value)
+        const onlineIds = await getOnlineUserIds(currentSessionId.value)
+        memberStats.value = stats
+        onlineUserIds.value = new Set(onlineIds)
+      } catch (error) {
+        console.error('刷新成员统计失败:', error)
+      }
+    }
+  }, 30000) // 30秒刷新一次
+}
+
+const stopMemberStatsRefresh = () => {
+  if (memberStatsInterval) {
+    clearInterval(memberStatsInterval)
+    memberStatsInterval = null
+  }
+}
+
 onMounted(async () => {
   // 从本地存储读取用户信息和Token
   const user = getUser<UserInfo>()
@@ -264,6 +423,12 @@ onMounted(async () => {
   
   // 先加载会话列表（这样可以在 WebSocket 连接成功后立即订阅）
   await loadSessions()
+  
+  // 加载当前会话的成员统计
+  if (currentSessionId.value) {
+    await loadMembersData()
+    startMemberStatsRefresh()
+  }
   
   // 确保消息滚动到底部（延迟执行，确保DOM完全渲染）
   setTimeout(() => {
@@ -318,6 +483,8 @@ const handleResize = () => {
 onUnmounted(() => {
   // 移除窗口大小变化监听
   window.removeEventListener('resize', handleResize)
+  // 停止成员统计刷新
+  stopMemberStatsRefresh()
   // 断开 WebSocket 连接
   wsService.disconnect()
 })
@@ -350,7 +517,15 @@ onUnmounted(() => {
       <div class="user-info">
         <div class="user-avatar">{{ currentUser?.nickname?.[0] || 'U' }}</div>
         <div class="user-details">
-          <div class="user-name">{{ currentUser?.nickname || '未知用户' }}</div>
+          <div class="user-name-wrapper">
+            <div class="user-name">{{ currentUser?.nickname || '未知用户' }}</div>
+            <button @click="openEditNickname" class="edit-nickname-btn" title="修改昵称">
+              <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+                <path d="M11 4H4a2 2 0 0 0-2 2v14a2 2 0 0 0 2 2h14a2 2 0 0 0 2-2v-7"></path>
+                <path d="M18.5 2.5a2.121 2.121 0 0 1 3 3L12 15l-4 1 1-4 9.5-9.5z"></path>
+              </svg>
+            </button>
+          </div>
           <div class="user-id">@{{ currentUser?.username }}</div>
         </div>
         <button @click="handleLogout" class="logout-btn">退出</button>
@@ -376,10 +551,34 @@ onUnmounted(() => {
     <main class="chat">
       <header class="chat-header">
         <div class="chat-header-content">
-          <h2>{{ currentSessionId ? (sessions.find(s => s.id === currentSessionId)?.name || '聊天') : '请选择会话' }}</h2>
+          <div class="chat-title-section">
+            <h2>
+              {{ currentSessionId ? (sessions.find(s => s.id === currentSessionId)?.name || '聊天') : '请选择会话' }}
+              <span v-if="getCurrentSessionStats()" class="member-count">
+                ({{ getCurrentSessionStats()?.totalMembers || 0 }})
+              </span>
+            </h2>
+            <button 
+              v-if="currentSessionId && sessions.find(s => s.id === currentSessionId)?.type === 'group'"
+              @click="openMembersList" 
+              class="members-btn"
+              title="查看群成员"
+            >
+              <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+                <path d="M17 21v-2a4 4 0 0 0-4-4H5a4 4 0 0 0-4 4v2"></path>
+                <circle cx="9" cy="7" r="4"></circle>
+                <path d="M23 21v-2a4 4 0 0 0-3-3.87"></path>
+                <path d="M16 3.13a4 4 0 0 1 0 7.75"></path>
+              </svg>
+            </button>
+          </div>
           <p class="chat-subtitle">
             <span class="status-dot" :class="{ 'connected': wsConnected }"></span>
             {{ wsConnected ? '已连接' : '连接中...' }}
+          </p>
+          <p v-if="getCurrentSessionStats()" class="online-count">
+            <span class="online-dot"></span>
+            {{ getCurrentSessionStats()?.onlineMembers || 0 }}
           </p>
         </div>
       </header>
@@ -430,6 +629,113 @@ onUnmounted(() => {
         </button>
       </footer>
     </main>
+
+    <!-- 修改昵称弹窗 -->
+    <div v-if="showEditNickname" class="modal-overlay" @click="closeEditNickname">
+      <div class="modal-content" @click.stop>
+        <div class="modal-header">
+          <h3>修改昵称</h3>
+          <button @click="closeEditNickname" class="modal-close-btn">×</button>
+        </div>
+        <div class="modal-body">
+          <input
+            v-model="newNickname"
+            type="text"
+            placeholder="请输入新昵称"
+            class="nickname-input"
+            maxlength="20"
+            @keyup.enter="saveNickname"
+            @keyup.esc="closeEditNickname"
+          />
+        </div>
+        <div class="modal-footer">
+          <button @click="closeEditNickname" class="btn-cancel">取消</button>
+          <button @click="saveNickname" class="btn-save" :disabled="updatingNickname || !newNickname.trim()">
+            {{ updatingNickname ? '保存中...' : '保存' }}
+          </button>
+        </div>
+      </div>
+    </div>
+
+    <!-- 群成员列表弹窗 -->
+    <div v-if="showMembersList" class="modal-overlay" @click="closeMembersList">
+      <div class="modal-content members-modal" @click.stop>
+        <div class="modal-header">
+          <h3>群成员</h3>
+          <button @click="closeMembersList" class="modal-close-btn">×</button>
+        </div>
+        <div class="modal-body members-list-body">
+          <div v-if="loadingMembers" class="loading-members">加载中...</div>
+          <div v-else-if="members.length === 0" class="empty-members">暂无成员</div>
+          <ul v-else class="members-list">
+            <li v-for="member in members" :key="member.userId" class="member-item">
+              <div class="member-avatar">{{ member.nickname?.[0] || 'U' }}</div>
+              <div class="member-info">
+                <div class="member-name-wrapper">
+                  <span class="member-name">{{ member.nickname }}</span>
+                  <span class="member-username">@{{ member.username }}</span>
+                </div>
+              </div>
+              <div class="member-status">
+                <span v-if="isUserOnline(member.userId)" class="online-indicator" title="在线">
+                  <span class="online-dot-small"></span>
+                </span>
+                <span v-else class="offline-indicator" title="离线">
+                  <span class="offline-dot-small"></span>
+                </span>
+              </div>
+            </li>
+          </ul>
+        </div>
+        <div class="modal-footer members-footer">
+          <div class="members-stats">
+            <span>总人数: {{ memberStats?.totalMembers || 0 }}</span>
+            <span>在线: {{ memberStats?.onlineMembers || 0 }}</span>
+          </div>
+          <button @click="closeMembersList" class="btn-close">关闭</button>
+        </div>
+      </div>
+    </div>
+
+    <!-- 群成员列表弹窗 -->
+    <div v-if="showMembersList" class="modal-overlay" @click="closeMembersList">
+      <div class="modal-content members-modal" @click.stop>
+        <div class="modal-header">
+          <h3>群成员</h3>
+          <button @click="closeMembersList" class="modal-close-btn">×</button>
+        </div>
+        <div class="modal-body members-list-body">
+          <div v-if="loadingMembers" class="loading-members">加载中...</div>
+          <div v-else-if="members.length === 0" class="empty-members">暂无成员</div>
+          <ul v-else class="members-list">
+            <li v-for="member in members" :key="member.userId" class="member-item">
+              <div class="member-avatar">{{ member.nickname?.[0] || 'U' }}</div>
+              <div class="member-info">
+                <div class="member-name-wrapper">
+                  <span class="member-name">{{ member.nickname }}</span>
+                  <span class="member-username">@{{ member.username }}</span>
+                </div>
+              </div>
+              <div class="member-status">
+                <span v-if="isUserOnline(member.userId)" class="online-indicator" title="在线">
+                  <span class="online-dot-small"></span>
+                </span>
+                <span v-else class="offline-indicator" title="离线">
+                  <span class="offline-dot-small"></span>
+                </span>
+              </div>
+            </li>
+          </ul>
+        </div>
+        <div class="modal-footer members-footer">
+          <div class="members-stats">
+            <span>总人数: {{ memberStats?.totalMembers || 0 }}</span>
+            <span>在线: {{ memberStats?.onlineMembers || 0 }}</span>
+          </div>
+          <button @click="closeMembersList" class="btn-close">关闭</button>
+        </div>
+      </div>
+    </div>
   </div>
 </template>
 
@@ -538,6 +844,12 @@ onUnmounted(() => {
   min-width: 0;
 }
 
+.user-name-wrapper {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+}
+
 .user-name {
   font-size: 14px;
   font-weight: 500;
@@ -545,6 +857,33 @@ onUnmounted(() => {
   white-space: nowrap;
   overflow: hidden;
   text-overflow: ellipsis;
+  flex: 1;
+}
+
+.edit-nickname-btn {
+  width: 20px;
+  height: 20px;
+  padding: 0;
+  background: transparent;
+  border: none;
+  color: #999;
+  cursor: pointer;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  border-radius: 4px;
+  transition: all 0.2s;
+  flex-shrink: 0;
+}
+
+.edit-nickname-btn:hover {
+  color: #667eea;
+  background: rgba(102, 126, 234, 0.1);
+}
+
+.edit-nickname-btn svg {
+  width: 14px;
+  height: 14px;
 }
 
 .user-id {
@@ -958,6 +1297,388 @@ onUnmounted(() => {
 @keyframes spin {
   to {
     transform: rotate(360deg);
+  }
+}
+
+/* 修改昵称弹窗样式 */
+.modal-overlay {
+  position: fixed;
+  top: 0;
+  left: 0;
+  right: 0;
+  bottom: 0;
+  background: rgba(0, 0, 0, 0.6);
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  z-index: 2000;
+  backdrop-filter: blur(4px);
+}
+
+.modal-content {
+  background: #252525;
+  border-radius: 12px;
+  width: 90%;
+  max-width: 400px;
+  border: 1px solid #333;
+  box-shadow: 0 8px 32px rgba(0, 0, 0, 0.4);
+  animation: modalFadeIn 0.3s ease;
+}
+
+@keyframes modalFadeIn {
+  from {
+    opacity: 0;
+    transform: scale(0.9);
+  }
+  to {
+    opacity: 1;
+    transform: scale(1);
+  }
+}
+
+.modal-header {
+  padding: 20px 24px;
+  border-bottom: 1px solid #333;
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+}
+
+.modal-header h3 {
+  margin: 0;
+  font-size: 18px;
+  color: #fff;
+  font-weight: 500;
+}
+
+.modal-close-btn {
+  width: 28px;
+  height: 28px;
+  padding: 0;
+  background: transparent;
+  border: none;
+  color: #999;
+  font-size: 24px;
+  line-height: 1;
+  cursor: pointer;
+  border-radius: 4px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  transition: all 0.2s;
+}
+
+.modal-close-btn:hover {
+  background: #333;
+  color: #fff;
+}
+
+.modal-body {
+  padding: 24px;
+}
+
+.nickname-input {
+  width: 100%;
+  padding: 12px 16px;
+  background: #1a1a1a;
+  border: 1px solid #333;
+  border-radius: 8px;
+  color: #fff;
+  font-size: 14px;
+  outline: none;
+  transition: all 0.2s;
+  box-sizing: border-box;
+}
+
+.nickname-input:focus {
+  border-color: #667eea;
+  box-shadow: 0 0 0 3px rgba(102, 126, 234, 0.1);
+}
+
+.nickname-input::placeholder {
+  color: #666;
+}
+
+.modal-footer {
+  padding: 16px 24px;
+  border-top: 1px solid #333;
+  display: flex;
+  gap: 12px;
+  justify-content: flex-end;
+}
+
+.btn-cancel,
+.btn-save {
+  padding: 10px 20px;
+  border-radius: 6px;
+  font-size: 14px;
+  font-weight: 500;
+  cursor: pointer;
+  transition: all 0.2s;
+  border: none;
+}
+
+.btn-cancel {
+  background: #333;
+  color: #e0e0e0;
+}
+
+.btn-cancel:hover {
+  background: #3a3a3a;
+}
+
+.btn-save {
+  background: #667eea;
+  color: #fff;
+}
+
+.btn-save:hover:not(:disabled) {
+  background: #5568d3;
+}
+
+.btn-save:disabled {
+  opacity: 0.5;
+  cursor: not-allowed;
+}
+
+/* 聊天标题区域 */
+.chat-title-section {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+}
+
+.member-count {
+  font-size: 16px;
+  font-weight: normal;
+  color: #999;
+  margin-left: 4px;
+}
+
+.members-btn {
+  width: 32px;
+  height: 32px;
+  padding: 0;
+  background: transparent;
+  border: 1px solid #444;
+  border-radius: 6px;
+  color: #e0e0e0;
+  cursor: pointer;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  transition: all 0.2s;
+  flex-shrink: 0;
+}
+
+.members-btn:hover {
+  background: #333;
+  border-color: #555;
+  color: #fff;
+}
+
+.members-btn svg {
+  width: 18px;
+  height: 18px;
+}
+
+.online-count {
+  margin: 4px 0 0 0;
+  font-size: 12px;
+  color: #999;
+  text-align: center;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  gap: 4px;
+}
+
+.online-dot {
+  width: 8px;
+  height: 8px;
+  border-radius: 50%;
+  background: #4caf50;
+  display: inline-block;
+  animation: pulse 2s infinite;
+}
+
+@keyframes pulse {
+  0%, 100% {
+    opacity: 1;
+  }
+  50% {
+    opacity: 0.5;
+  }
+}
+
+/* 群成员列表弹窗 */
+.members-modal {
+  max-width: 500px;
+  max-height: 80vh;
+  display: flex;
+  flex-direction: column;
+}
+
+.members-list-body {
+  flex: 1;
+  overflow-y: auto;
+  padding: 0;
+  min-height: 300px;
+  max-height: 500px;
+}
+
+.loading-members,
+.empty-members {
+  padding: 40px 24px;
+  text-align: center;
+  color: #999;
+}
+
+.members-list {
+  list-style: none;
+  padding: 0;
+  margin: 0;
+}
+
+.member-item {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  padding: 12px 24px;
+  border-bottom: 1px solid #333;
+  transition: background 0.2s;
+}
+
+.member-item:hover {
+  background: #2a2a2a;
+}
+
+.member-item:last-child {
+  border-bottom: none;
+}
+
+.member-avatar {
+  width: 40px;
+  height: 40px;
+  border-radius: 50%;
+  background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  font-weight: bold;
+  color: white;
+  flex-shrink: 0;
+  font-size: 16px;
+}
+
+.member-info {
+  flex: 1;
+  min-width: 0;
+}
+
+.member-name-wrapper {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  flex-wrap: wrap;
+}
+
+.member-name {
+  font-size: 14px;
+  font-weight: 500;
+  color: #fff;
+}
+
+.member-username {
+  font-size: 12px;
+  color: #999;
+}
+
+.member-status {
+  flex-shrink: 0;
+}
+
+.online-indicator,
+.offline-indicator {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+}
+
+.online-dot-small {
+  width: 10px;
+  height: 10px;
+  border-radius: 50%;
+  background: #4caf50;
+  display: inline-block;
+  animation: pulse 2s infinite;
+}
+
+.offline-dot-small {
+  width: 10px;
+  height: 10px;
+  border-radius: 50%;
+  background: #666;
+  display: inline-block;
+}
+
+.members-footer {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  padding: 16px 24px;
+  border-top: 1px solid #333;
+}
+
+.members-stats {
+  display: flex;
+  gap: 16px;
+  font-size: 12px;
+  color: #999;
+}
+
+.btn-close {
+  padding: 8px 20px;
+  background: #333;
+  color: #e0e0e0;
+  border: none;
+  border-radius: 6px;
+  font-size: 14px;
+  cursor: pointer;
+  transition: all 0.2s;
+}
+
+.btn-close:hover {
+  background: #3a3a3a;
+}
+
+/* 移动端适配 */
+@media (max-width: 768px) {
+  .members-modal {
+    max-width: 90vw;
+    max-height: 85vh;
+  }
+
+  .members-list-body {
+    max-height: 400px;
+  }
+
+  .member-item {
+    padding: 10px 16px;
+  }
+
+  .members-footer {
+    flex-direction: column;
+    gap: 12px;
+    align-items: stretch;
+  }
+
+  .members-stats {
+    justify-content: space-between;
+  }
+
+  .btn-close {
+    width: 100%;
   }
 }
 </style>

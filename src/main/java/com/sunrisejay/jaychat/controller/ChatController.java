@@ -5,6 +5,8 @@ import com.sunrisejay.jaychat.common.util.JwtTokenUtil;
 import com.sunrisejay.jaychat.config.WebSocketAuthInterceptor;
 import com.sunrisejay.jaychat.dto.request.MessageRequest;
 import com.sunrisejay.jaychat.dto.response.MessageResponse;
+import com.sunrisejay.jaychat.dto.response.SessionMemberResponse;
+import com.sunrisejay.jaychat.dto.response.SessionMemberStatsResponse;
 import com.sunrisejay.jaychat.entity.ChatSession;
 import com.sunrisejay.jaychat.service.ChatService;
 import org.slf4j.Logger;
@@ -19,6 +21,7 @@ import javax.servlet.http.HttpServletRequest;
 import javax.validation.Valid;
 import java.security.Principal;
 import java.util.List;
+import java.util.Set;
 
 /**
  * 聊天控制器
@@ -121,6 +124,54 @@ public class ChatController {
         String destination = "/topic/session." + request.getSessionId();
         messagingTemplate.convertAndSend(destination, response);
         logger.debug("消息已广播: destination={}, messageId={}", destination, response.getId());
+    }
+
+    /**
+     * 获取会话成员列表
+     */
+    @GetMapping("/sessions/{sessionId}/members")
+    public ApiResponse<List<SessionMemberResponse>> getSessionMembers(
+            @PathVariable Long sessionId,
+            HttpServletRequest request) {
+        Long userId = jwtTokenUtil.getUserIdFromRequest(request);
+        if (userId == null) {
+            return ApiResponse.error(401, "未登录");
+        }
+        
+        List<SessionMemberResponse> members = chatService.getSessionMembers(sessionId);
+        return ApiResponse.success(members);
+    }
+    
+    /**
+     * 获取会话成员统计
+     */
+    @GetMapping("/sessions/{sessionId}/members/stats")
+    public ApiResponse<SessionMemberStatsResponse> getSessionMemberStats(
+            @PathVariable Long sessionId,
+            HttpServletRequest request) {
+        Long userId = jwtTokenUtil.getUserIdFromRequest(request);
+        if (userId == null) {
+            return ApiResponse.error(401, "未登录");
+        }
+        
+        SessionMemberStatsResponse stats = chatService.getSessionMemberStats(sessionId);
+        return ApiResponse.success(stats);
+    }
+    
+    /**
+     * 获取在线用户ID列表
+     */
+    @GetMapping("/sessions/{sessionId}/members/online")
+    public ApiResponse<Set<Long>> getOnlineUserIds(
+            @PathVariable Long sessionId,
+            HttpServletRequest request) {
+        Long userId = jwtTokenUtil.getUserIdFromRequest(request);
+        if (userId == null) {
+            return ApiResponse.error(401, "未登录");
+        }
+        
+        Set<Long> onlineUserIds = chatService.getOnlineUserIds(sessionId);
+        return ApiResponse.success(onlineUserIds);
     }
 
     /**

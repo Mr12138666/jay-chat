@@ -3,6 +3,8 @@ package com.sunrisejay.jaychat.service;
 import com.sunrisejay.jaychat.common.exception.BusinessException;
 import com.sunrisejay.jaychat.dto.request.MessageRequest;
 import com.sunrisejay.jaychat.dto.response.MessageResponse;
+import com.sunrisejay.jaychat.dto.response.SessionMemberResponse;
+import com.sunrisejay.jaychat.dto.response.SessionMemberStatsResponse;
 import com.sunrisejay.jaychat.entity.ChatMessage;
 import com.sunrisejay.jaychat.entity.ChatSession;
 import com.sunrisejay.jaychat.entity.User;
@@ -16,6 +18,7 @@ import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
 
 import java.util.List;
+import java.util.Set;
 import java.util.stream.Collectors;
 
 /**
@@ -31,15 +34,18 @@ public class ChatService {
     private final ChatSessionMapper sessionMapper;
     private final ChatSessionMemberMapper memberMapper;
     private final UserMapper userMapper;
+    private final OnlineUserService onlineUserService;
 
     public ChatService(ChatMessageMapper messageMapper,
                        ChatSessionMapper sessionMapper,
                        ChatSessionMemberMapper memberMapper,
-                       UserMapper userMapper) {
+                       UserMapper userMapper,
+                       OnlineUserService onlineUserService) {
         this.messageMapper = messageMapper;
         this.sessionMapper = sessionMapper;
         this.memberMapper = memberMapper;
         this.userMapper = userMapper;
+        this.onlineUserService = onlineUserService;
     }
 
     /**
@@ -132,10 +138,17 @@ public class ChatService {
     }
 
     /**
-     * 获取会话成员
+     * 获取会话成员（用户ID列表）
      */
-    public List<Long> getSessionMembers(Long sessionId) {
+    public List<Long> getSessionMemberIds(Long sessionId) {
         return memberMapper.selectUserIdsBySessionId(sessionId);
+    }
+
+    /**
+     * 获取会话成员列表（带用户信息）
+     */
+    public List<SessionMemberResponse> getSessionMembers(Long sessionId) {
+        return memberMapper.selectMembersWithUserInfo(sessionId);
     }
 
     /**
@@ -197,4 +210,25 @@ public class ChatService {
         }
         return null;
     }
+
+    /**
+     * 获取会话成员统计
+     */
+    public SessionMemberStatsResponse getSessionMemberStats(Long sessionId) {
+        Integer totalMembers = memberMapper.countMembers(sessionId);
+        Integer onlineMembers = onlineUserService.getOnlineCount(sessionId);
+
+        SessionMemberStatsResponse stats = new SessionMemberStatsResponse();
+        stats.setTotalMembers(totalMembers);
+        stats.setOnlineMembers(onlineMembers);
+        return stats;
+    }
+
+    /**
+     * 获取在线用户ID列表
+     */
+    public Set<Long> getOnlineUserIds(Long sessionId) {
+        return onlineUserService.getOnlineUsers(sessionId);
+    }
+
 }

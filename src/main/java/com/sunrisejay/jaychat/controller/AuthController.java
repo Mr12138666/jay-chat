@@ -4,6 +4,7 @@ import com.sunrisejay.jaychat.common.ApiResponse;
 import com.sunrisejay.jaychat.common.util.JwtTokenUtil;
 import com.sunrisejay.jaychat.dto.request.LoginRequest;
 import com.sunrisejay.jaychat.dto.request.RegisterRequest;
+import com.sunrisejay.jaychat.dto.request.UpdateNicknameRequest;
 import com.sunrisejay.jaychat.dto.response.LoginResponse;
 import com.sunrisejay.jaychat.service.AuthService;
 import io.jsonwebtoken.Claims;
@@ -55,5 +56,58 @@ public class AuthController {
             return ApiResponse.error(401, "未登录");
         }
         return ApiResponse.success(claims);
+
     }
+
+
+    /**
+     * 修改昵称
+     */
+    @PutMapping("/nickname")
+    public ApiResponse<Void> updateNickname(@Valid @RequestBody UpdateNicknameRequest request, HttpServletRequest httpRequest) {
+
+        Long userId = jwtTokenUtil.getUserIdFromRequest(httpRequest);
+        if (userId == null) {
+            return ApiResponse.error(401, "未登录");
+        }
+
+        authService.updateNickname(userId, request.getNickname());
+        return ApiResponse.success(null);
+
+    }
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
 }

@@ -78,12 +78,36 @@ public class JwtTokenUtil {
 
     /**
      * 从HTTP请求中提取Token
+     * 支持两种格式：
+     * 1. Authorization: Bearer <token> (标准格式)
+     * 2. Authorization: <token> (简化格式，兼容性支持)
      */
     private String extractToken(HttpServletRequest request) {
         String authHeader = request.getHeader(HttpHeaders.AUTHORIZATION);
-        if (authHeader == null || !authHeader.startsWith(BEARER_PREFIX)) {
+        
+        if (authHeader == null || authHeader.trim().isEmpty()) {
+            logger.debug("请求头中未找到Authorization字段");
             return null;
         }
-        return authHeader.substring(BEARER_PREFIX.length());
+        
+        // 如果以 "Bearer " 开头，去掉前缀
+        if (authHeader.startsWith(BEARER_PREFIX)) {
+            String token = authHeader.substring(BEARER_PREFIX.length()).trim();
+            if (token.isEmpty()) {
+                logger.warn("Bearer token为空");
+                return null;
+            }
+            return token;
+        }
+        
+        // 如果没有 "Bearer " 前缀，直接当作token使用（兼容性支持）
+        String token = authHeader.trim();
+        if (token.isEmpty()) {
+            logger.warn("Token为空");
+            return null;
+        }
+        
+        logger.debug("从Authorization请求头提取token（未使用Bearer前缀）");
+        return token;
     }
 }

@@ -1,9 +1,7 @@
 package com.sunrisejay.jaychat.mapper;
 
-import org.apache.ibatis.annotations.Insert;
-import org.apache.ibatis.annotations.Mapper;
-import org.apache.ibatis.annotations.Param;
-import org.apache.ibatis.annotations.Select;
+import com.sunrisejay.jaychat.dto.response.SessionMemberResponse;
+import org.apache.ibatis.annotations.*;
 
 import java.util.List;
 
@@ -24,4 +22,15 @@ public interface ChatSessionMemberMapper {
     @Select("SELECT COUNT(*) > 0 FROM chat_session_member " +
             "WHERE session_id = #{sessionId} AND user_id = #{userId}")
     boolean exists(@Param("sessionId") Long sessionId, @Param("userId") Long userId);
+    // ... 现有方法 ...
+
+    /**
+     * 查询会话成员列表（带用户信息）
+     */
+    List<SessionMemberResponse> selectMembersWithUserInfo(@Param("sessionId") Long sessionId);
+
+    /**
+     * 统计会话成员总数
+     */
+    Integer countMembers(@Param("sessionId") Long sessionId);
 }

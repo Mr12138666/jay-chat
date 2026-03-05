@@ -43,3 +43,13 @@ export const register = (data: RegisterRequest): Promise<void> => {
 export const getCurrentUser = (): Promise<UserInfo> => {
   return request.get('/api/auth/me')
 }
+
+// 修改昵称请求参数
+export interface UpdateNicknameRequest {
+  nickname: string
+}
+
+// 修改昵称接口
+export const updateNickname = (data: UpdateNicknameRequest): Promise<void> => {
+  return request.put('/api/auth/nickname', data)
+}

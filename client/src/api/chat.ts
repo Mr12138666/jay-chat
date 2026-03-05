@@ -36,3 +36,33 @@ export const getMessages = (sessionId: number, page: number = 1, pageSize: numbe
     params: { page, pageSize }
   })
 }
+
+// 会话成员信息
+export interface SessionMember {
+  userId: number
+  username: string
+  nickname: string
+  avatar: string | null
+  joinedAt: string
+}
+
+// 会话成员统计
+export interface SessionMemberStats {
+  totalMembers: number
+  onlineMembers: number
+}
+
+// 获取会话成员列表
+export const getSessionMembers = (sessionId: number): Promise<SessionMember[]> => {
+  return request.get(`/api/chat/sessions/${sessionId}/members`)
+}
+
+// 获取会话成员统计
+export const getSessionMemberStats = (sessionId: number): Promise<SessionMemberStats> => {
+  return request.get(`/api/chat/sessions/${sessionId}/members/stats`)
+}
+
+// 获取在线用户ID列表
+export const getOnlineUserIds = (sessionId: number): Promise<number[]> => {
+  return request.get(`/api/chat/sessions/${sessionId}/members/online`)
+}

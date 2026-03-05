@@ -13,6 +13,11 @@
         <result column="created_at" property="createdAt"/>
         <result column="updated_at" property="updatedAt"/>
     </resultMap>
+    <update id="updateNickname">
+        UPDATE `user`
+        SET nickname = #{nickname}, updated_at = NOW()
+        WHERE id = #{id}
+    </update>
 
     <select id="findByUsername" resultMap="UserResultMap">
         SELECT id, username, password, nickname, avatar, created_at, updated_at
