@@ -66,3 +66,14 @@ export const getSessionMemberStats = (sessionId: number): Promise<SessionMemberS
 export const getOnlineUserIds = (sessionId: number): Promise<number[]> => {
   return request.get(`/api/chat/sessions/${sessionId}/members/online`)
 }
+
+// 上传聊天图片
+export const uploadChatImage = (file: File): Promise<string> => {
+  const formData = new FormData()
+  formData.append('file', file)
+  return request.post('/api/chat/images/upload', formData, {
+    headers: {
+      'Content-Type': 'multipart/form-data'
+    }
+  })
+}

@@ -10,6 +10,7 @@ import {
   getSessionMembers,
   getSessionMemberStats,
   getOnlineUserIds,
+  uploadChatImage,
   type ChatSession,
   type SessionMember,
   type SessionMemberStats
@@ -41,6 +42,7 @@ const messages = ref<Array<{
   time: string
   senderId?: number
   senderAvatar?: string | null
+  contentType?: string
 }>>([])
 
 // 用户头像缓存（userId -> avatar）
@@ -83,7 +85,12 @@ const loadingMembers = ref(false)
 
 // 表情选择器相关
 const showEmojiPicker = ref(false)
-const emojiPickerRef = ref<HTMLElement | null>(null)
+
+// 图片上传相关
+const imageFileInput = ref<HTMLInputElement | null>(null)
+const uploadingImage = ref(false)
+const showImagePreview = ref(false)
+const previewImageUrl = ref<string | null>(null)
 
 // 加载会话列表
 const loadSessions = async () => {
@@ -188,10 +195,11 @@ const loadMessages = async (sessionId: number) => {
     messages.value = history.map(msg => ({
       id: msg.id,
       sender: msg.senderNickname || `用户${msg.senderId}`,
-      content: msg.content,
+      content: msg.contentType === 'image' ? msg.content : convertEmojiCodesInText(msg.content),
       time: formatTime(msg.sentAt),
       senderId: msg.senderId,
-      senderAvatar: userAvatarCache.value.get(msg.senderId || 0) || null
+      senderAvatar: userAvatarCache.value.get(msg.senderId || 0) || null,
+      contentType: msg.contentType || 'text'
     })).reverse() // 反转，最新的在底部
     
     // 滚动到底部
@@ -279,6 +287,71 @@ const selectEmoji = (code: string) => {
   })
 }
 
+// 图片上传相关
+const handleImageSelect = () => {
+  imageFileInput.value?.click()
+}
+
+const handleImageFileChange = async (event: Event) => {
+  const target = event.target as HTMLInputElement
+  const file = target.files?.[0]
+  if (!file) return
+
+  // 验证文件类型
+  if (!file.type.startsWith('image/')) {
+    showError('请选择图片文件')
+    return
+  }
+
+  // 验证文件大小（10MB）
+  if (file.size > 10 * 1024 * 1024) {
+    showError('图片大小不能超过10MB')
+    return
+  }
+
+  if (!currentSessionId.value) {
+    showError('请先选择会话')
+    return
+  }
+
+  try {
+    uploadingImage.value = true
+    // 上传图片到OSS
+    const imageUrl = await uploadChatImage(file)
+    
+    // 发送图片消息
+    const success = wsService.sendMessage(
+      currentSessionId.value,
+      imageUrl,
+      'image'
+    )
+    
+    if (!success) {
+      showError('发送图片失败，WebSocket 未连接')
+    }
+  } catch (error) {
+    handleApiError(error)
+    showError('上传图片失败')
+  } finally {
+    uploadingImage.value = false
+    // 清空文件选择
+    if (target) {
+      target.value = ''
+    }
+  }
+}
+
+// 图片预览相关
+const openImagePreview = (imageUrl: string) => {
+  previewImageUrl.value = imageUrl
+  showImagePreview.value = true
+}
+
+const closeImagePreview = () => {
+  showImagePreview.value = false
+  previewImageUrl.value = null
+}
+
 // 注意：getMessageBackgroundColor 已从 utils/color 导入，直接使用即可
 
 // 处理接收到的消息
@@ -318,7 +391,9 @@ const handleMessage = async (message: ChatMessage) => {
     }
     
     // 确保表情代码被转换（双重保障，后端已经转换了）
-    const displayContent = convertEmojiCodesInText(message.content)
+    const displayContent = message.contentType === 'image' 
+      ? message.content 
+      : convertEmojiCodesInText(message.content)
     
     messages.value.push({
       id: message.id || Date.now(),
@@ -326,7 +401,8 @@ const handleMessage = async (message: ChatMessage) => {
       content: displayContent,
       time: formatTime(message.sentAt),
       senderId: message.senderId,
-      senderAvatar
+      senderAvatar,
+      contentType: message.contentType || 'text'
     })
     
     console.log('添加消息到列表:', {
@@ -841,7 +917,17 @@ onUnmounted(() => {
                   color: '#ffffff'
                 } : {}"
               >
-                {{ msg.content }}
+                <!-- 图片消息 -->
+                <img 
+                  v-if="msg.contentType === 'image'"
+                  :src="msg.content"
+                  :alt="msg.sender + ' 的图片'"
+                  class="message-image"
+                  @click="openImagePreview(msg.content)"
+                  @error="(e) => { const target = e.target as HTMLImageElement; if (target) target.style.display = 'none' }"
+                />
+                <!-- 文本消息 -->
+                <span v-else>{{ msg.content }}</span>
               </div>
             </div>
           </div>
@@ -853,6 +939,22 @@ onUnmounted(() => {
 
       <footer class="chat-input" v-if="currentSessionId">
         <div class="input-wrapper" style="position: relative;">
+          <button 
+            @click="handleImageSelect"
+            class="image-btn"
+            type="button"
+            :disabled="!wsConnected || uploadingImage"
+            title="上传图片"
+          >
+            📷
+          </button>
+          <input
+            ref="imageFileInput"
+            type="file"
+            accept="image/*"
+            style="display: none"
+            @change="handleImageFileChange"
+          />
           <button 
             @click="toggleEmojiPicker"
             class="emoji-btn"
@@ -886,6 +988,14 @@ onUnmounted(() => {
           发送
         </button>
       </footer>
+
+      <!-- 图片预览弹窗 -->
+      <div v-if="showImagePreview" class="image-preview-overlay" @click="closeImagePreview">
+        <div class="image-preview-container" @click.stop>
+          <button class="image-preview-close" @click="closeImagePreview">×</button>
+          <img :src="previewImageUrl || ''" alt="预览图片" class="image-preview-img" />
+        </div>
+      </div>
     </main>
 
     <!-- 用户详情弹窗 -->
@@ -1477,6 +1587,22 @@ onUnmounted(() => {
   white-space: pre-wrap;
 }
 
+/* 消息中的图片样式 */
+.message-image {
+  max-width: 300px;
+  max-height: 400px;
+  border-radius: 8px;
+  cursor: pointer;
+  display: block;
+  object-fit: contain;
+  transition: transform 0.2s;
+}
+
+.message-image:hover {
+  transform: scale(1.02);
+  box-shadow: 0 4px 12px rgba(0, 0, 0, 0.3);
+}
+
 /* 自己的消息样式已在上面定义，这里删除重复定义 */
 
 .message.own-message .message-content {
@@ -1529,6 +1655,33 @@ onUnmounted(() => {
   align-items: center;
   gap: 8px;
   position: relative;
+}
+
+.image-btn {
+  width: 40px;
+  height: 40px;
+  padding: 0;
+  background: #1a1a1a;
+  border: 1px solid #333;
+  border-radius: 6px;
+  color: #e0e0e0;
+  font-size: 20px;
+  cursor: pointer;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  transition: all 0.2s;
+  flex-shrink: 0;
+}
+
+.image-btn:hover:not(:disabled) {
+  background: #2a2a2a;
+  border-color: #667eea;
+}
+
+.image-btn:disabled {
+  opacity: 0.5;
+  cursor: not-allowed;
 }
 
 .emoji-btn {
@@ -2122,4 +2275,72 @@ onUnmounted(() => {
 
 /* 群成员列表弹窗 */
 /* 已迁移至 components/chat/MembersModal.vue */
+
+/* 图片预览弹窗 */
+.image-preview-overlay {
+  position: fixed;
+  top: 0;
+  left: 0;
+  right: 0;
+  bottom: 0;
+  background: rgba(0, 0, 0, 0.9);
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  z-index: 10000;
+  cursor: pointer;
+  animation: fadeIn 0.2s ease-out;
+}
+
+@keyframes fadeIn {
+  from {
+    opacity: 0;
+  }
+  to {
+    opacity: 1;
+  }
+}
+
+.image-preview-container {
+  position: relative;
+  max-width: 90vw;
+  max-height: 90vh;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  cursor: default;
+}
+
+.image-preview-close {
+  position: absolute;
+  top: -40px;
+  right: 0;
+  width: 36px;
+  height: 36px;
+  background: rgba(255, 255, 255, 0.2);
+  border: 1px solid rgba(255, 255, 255, 0.3);
+  border-radius: 50%;
+  color: white;
+  font-size: 24px;
+  line-height: 1;
+  cursor: pointer;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  transition: all 0.2s;
+  z-index: 10001;
+}
+
+.image-preview-close:hover {
+  background: rgba(255, 255, 255, 0.3);
+  transform: scale(1.1);
+}
+
+.image-preview-img {
+  max-width: 100%;
+  max-height: 90vh;
+  object-fit: contain;
+  border-radius: 8px;
+  box-shadow: 0 8px 32px rgba(0, 0, 0, 0.5);
+}
 </style>

@@ -37,7 +37,83 @@ public class OssService {
     }
 
     /**
-     * 上传文件到OSS
+     * 上传聊天图片到OSS（保持原图，不裁剪）
+     * @param file 图片文件
+     * @param userId 用户ID（用于生成文件路径）
+     * @return 图片访问URL
+     */
+    public String uploadChatImage(MultipartFile file, Long userId) {
+        if (file == null || file.isEmpty()) {
+            throw new BusinessException("文件不能为空");
+        }
+
+        // 验证文件类型（只允许图片）
+        String originalFilename = file.getOriginalFilename();
+        if (originalFilename == null) {
+            throw new BusinessException("文件名不能为空");
+        }
+
+        String fileExtension = getFileExtension(originalFilename);
+        if (!isImageFile(fileExtension)) {
+            throw new BusinessException("只支持图片格式：jpg, jpeg, png, gif, webp");
+        }
+
+        // 验证文件大小（限制10MB，聊天图片可以比头像大）
+        long fileSize = file.getSize();
+        if (fileSize > 10 * 1024 * 1024) {
+            throw new BusinessException("图片大小不能超过10MB");
+        }
+
+        OSS ossClient = null;
+        try {
+            // 验证是否为有效图片
+            BufferedImage sourceImage = ImageIO.read(file.getInputStream());
+            if (sourceImage == null) {
+                throw new BusinessException("文件内容不是有效图片");
+            }
+
+            // 创建OSS客户端
+            ossClient = new OSSClientBuilder().build(
+                    ossProperties.getEndpoint(),
+                    ossProperties.getAccessKeyId(),
+                    ossProperties.getAccessKeySecret()
+            );
+
+            // 生成文件名，使用 chat/ 前缀区分聊天图片
+            String fileName = generateChatImageFileName(userId, fileExtension);
+            String objectName = "chat/" + fileName;
+
+            // 上传原图（不裁剪，不压缩）
+            ObjectMetadata metadata = new ObjectMetadata();
+            metadata.setContentType("image/" + (fileExtension.equals("jpg") ? "jpeg" : fileExtension));
+            metadata.setContentLength(file.getSize());
+
+            PutObjectRequest putObjectRequest = new PutObjectRequest(
+                    ossProperties.getBucketName(),
+                    objectName,
+                    file.getInputStream()
+            );
+            putObjectRequest.setMetadata(metadata);
+            ossClient.putObject(putObjectRequest);
+
+            String fileUrl = ossProperties.getDomain() + "/" + objectName;
+            logger.info("聊天图片上传成功: userId={}, objectName={}", userId, objectName);
+            return fileUrl;
+
+        } catch (BusinessException e) {
+            throw e;
+        } catch (Exception e) {
+            logger.error("聊天图片上传失败: userId={}", userId, e);
+            throw new BusinessException("图片上传失败: " + e.getMessage());
+        } finally {
+            if (ossClient != null) {
+                ossClient.shutdown();
+            }
+        }
+    }
+
+    /**
+     * 上传文件到OSS（头像专用，会裁剪成方形）
      * @param file 文件
      * @param userId 用户ID（用于生成文件路径）
      * @return 文件访问URL
@@ -166,11 +242,19 @@ public class OssService {
 
 
     /**
-     * 生成文件名（不含扩展名）
+     * 生成文件名（不含扩展名）- 头像专用
      */
     private String generateFileName(Long userId) {
         String uuid = UUID.randomUUID().toString().replace("-", "");
         return userId + "/" + uuid;
+    }
+
+    /**
+     * 生成聊天图片文件名（包含扩展名）
+     */
+    private String generateChatImageFileName(Long userId, String extension) {
+        String uuid = UUID.randomUUID().toString().replace("-", "");
+        return userId + "/" + uuid + "." + extension;
     }
 
     private void uploadResizedImage(OSS ossClient, BufferedImage source, String objectName, int targetSize) throws Exception {

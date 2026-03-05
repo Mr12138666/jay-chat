@@ -10,8 +10,10 @@ import com.sunrisejay.jaychat.dto.response.SessionMemberResponse;
 import com.sunrisejay.jaychat.dto.response.SessionMemberStatsResponse;
 import com.sunrisejay.jaychat.entity.ChatSession;
 import com.sunrisejay.jaychat.service.ChatService;
+import com.sunrisejay.jaychat.service.OssService;
 import org.springframework.messaging.simp.SimpMessagingTemplate;
 import org.springframework.web.bind.annotation.*;
+import org.springframework.web.multipart.MultipartFile;
 
 import javax.servlet.http.HttpServletRequest;
 import javax.validation.Valid;
@@ -29,10 +31,12 @@ public class ChatController extends BaseController {
 
     private final ChatService chatService;
     private final SimpMessagingTemplate messagingTemplate;
+    private final OssService ossService;
 
-    public ChatController(ChatService chatService, SimpMessagingTemplate messagingTemplate) {
+    public ChatController(ChatService chatService, SimpMessagingTemplate messagingTemplate, OssService ossService) {
         this.chatService = chatService;
         this.messagingTemplate = messagingTemplate;
+        this.ossService = ossService;
     }
 
     /**
@@ -148,5 +152,22 @@ public class ChatController extends BaseController {
         
         Set<Long> onlineUserIds = chatService.getOnlineUserIds(sessionId);
         return ApiResponse.success(onlineUserIds);
+    }
+
+    /**
+     * 上传聊天图片
+     */
+    @PostMapping("/images/upload")
+    public ApiResponse<String> uploadImage(
+            @RequestParam("file") MultipartFile file,
+            HttpServletRequest request) {
+        ApiResponse<?> authCheck = checkAuth(request);
+        if (authCheck != null) {
+            return (ApiResponse<String>) authCheck;
+        }
+
+        Long userId = getCurrentUserId(request);
+        String imageUrl = ossService.uploadChatImage(file, userId);
+        return ApiResponse.success(imageUrl);
     }
 }
