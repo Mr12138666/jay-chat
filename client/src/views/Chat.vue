@@ -1,98 +1,108 @@
 <script setup lang="ts">
-import { ref, onMounted, onUnmounted, nextTick } from 'vue'
+import { ref, onMounted, onUnmounted } from 'vue'
 import { useRouter } from 'vue-router'
 import type { UserInfo, UserDetail } from '../api/auth'
 import { updateNickname, getUserDetail, uploadAvatar } from '../api/auth'
-import { 
-  getSessions, 
-  getMessages, 
-  getOrCreateDefaultSession, 
+import {
+  getSessions,
+  getOrCreateDefaultSession,
   getSessionMembers,
   getSessionMemberStats,
   getOnlineUserIds,
-  uploadChatImage,
   type ChatSession,
   type SessionMember,
   type SessionMemberStats
 } from '../api/chat'
-import { wsService, type ChatMessage } from '../utils/websocket'
+import { wsService } from '../utils/websocket'
 import { formatTime } from '../utils/date'
 import { getUser, getToken, clearAuth, setUser } from '../utils/storage'
 import { handleApiError, showError, showSuccess } from '../utils/error'
 import MembersModal from '../components/chat/MembersModal.vue'
-import EmojiPicker from '../components/chat/EmojiPicker.vue'
+import ChatMessageList from '../components/chat/ChatMessageList.vue'
+import ChatComposer from '../components/chat/ChatComposer.vue'
 import { validateAvatarFile, withCacheBuster } from '../utils/avatar'
-import { convertEmojiCodesInText } from '../utils/emoji'
-import { getMessageBackgroundColor } from '../utils/color'
+import { useChatMessages } from '../composables/useChatMessages'
 
 const router = useRouter()
 
-// 当前用户信息
 const currentUser = ref<UserInfo | null>(null)
-
-// 会话列表
 const sessions = ref<ChatSession[]>([])
 const currentSessionId = ref<number | null>(null)
-
-// 消息列表
-const messages = ref<Array<{
-  id: number
-  sender: string
-  content: string
-  time: string
-  senderId?: number
-  senderAvatar?: string | null
-  contentType?: string
-}>>([])
-
-// 用户头像缓存（userId -> avatar）
-const userAvatarCache = ref<Map<number, string | null>>(new Map())
-
-// 当前输入的消息
-const inputMessage = ref('')
-const loading = ref(false)
-
-// WebSocket 连接状态（响应式）
 const wsConnected = ref(false)
-
-// 消息容器引用
 const messagesContainer = ref<HTMLElement | null>(null)
-
-// 移动端侧边栏显示状态
 const showSidebar = ref(false)
 
-// 用户详情弹窗相关
 const showUserDetail = ref(false)
 const viewingUserId = ref<number | null>(null)
 const userDetail = ref<UserDetail | null>(null)
 const loadingUserDetail = ref(false)
-
-// 修改昵称相关（迁移到详情弹窗）
 const showEditNickname = ref(false)
 const newNickname = ref('')
 const updatingNickname = ref(false)
-
-// 修改头像相关
 const uploadingAvatar = ref(false)
 const avatarFileInput = ref<HTMLInputElement | null>(null)
 
-// 群成员列表相关
 const showMembersList = ref(false)
 const members = ref<SessionMember[]>([])
 const memberStats = ref<SessionMemberStats | null>(null)
 const onlineUserIds = ref<Set<number>>(new Set())
 const loadingMembers = ref(false)
 
-// 表情选择器相关
-const showEmojiPicker = ref(false)
+const userAvatarCache = ref<Map<number, string | null>>(new Map())
 
-// 图片上传相关
-const imageFileInput = ref<HTMLInputElement | null>(null)
-const uploadingImage = ref(false)
-const showImagePreview = ref(false)
-const previewImageUrl = ref<string | null>(null)
+const scrollToBottom = (smooth = false) => {
+  if (!messagesContainer.value) return
+  if (smooth) {
+    messagesContainer.value.scrollTo({
+      top: messagesContainer.value.scrollHeight,
+      behavior: 'smooth'
+    })
+  } else {
+    messagesContainer.value.scrollTop = messagesContainer.value.scrollHeight
+  }
+}
 
-// 加载会话列表
+const getUserAvatar = async (userId: number): Promise<string | null> => {
+  if (userAvatarCache.value.has(userId)) {
+    return userAvatarCache.value.get(userId) || null
+  }
+
+  try {
+    const detail = await getUserDetail(userId)
+    const avatar = detail.avatar
+    userAvatarCache.value.set(userId, avatar)
+    return avatar
+  } catch {
+    userAvatarCache.value.set(userId, null)
+    return null
+  }
+}
+
+const {
+  messages,
+  inputMessage,
+  loading,
+  showEmojiPicker,
+  uploadingImage,
+  showImagePreview,
+  previewImageUrl,
+  loadMessages,
+  sendMessage,
+  toggleEmojiPicker,
+  closeEmojiPicker,
+  selectEmoji,
+  handleImageFileChange,
+  openImagePreview,
+  closeImagePreview,
+  handleMessage
+} = useChatMessages({
+  currentSessionId,
+  getUserAvatar,
+  scrollToBottom,
+  showError,
+  handleApiError
+})
+
 const loadSessions = async () => {
   try {
     console.log('开始加载会话列表...')
@@ -156,294 +166,35 @@ const loadSessions = async () => {
   }
 }
 
-// 获取用户头像（带缓存）
-const getUserAvatar = async (userId: number): Promise<string | null> => {
-  if (userAvatarCache.value.has(userId)) {
-    return userAvatarCache.value.get(userId) || null
-  }
-  
-  try {
-    const detail = await getUserDetail(userId)
-    const avatar = detail.avatar
-    userAvatarCache.value.set(userId, avatar)
-    return avatar
-  } catch (error) {
-    console.error('获取用户头像失败:', error)
-    userAvatarCache.value.set(userId, null)
-    return null
-  }
-}
-
-// 批量获取用户头像
-const loadUserAvatars = async (userIds: number[]) => {
-  const uniqueUserIds = [...new Set(userIds)]
-  const promises = uniqueUserIds.map(userId => getUserAvatar(userId))
-  await Promise.all(promises)
-}
-
-// 加载消息历史
-const loadMessages = async (sessionId: number) => {
-  try {
-    loading.value = true
-    const history = await getMessages(sessionId, 1, 50)
-    
-    // 提取所有发送者ID
-    const senderIds = history.map(msg => msg.senderId).filter(id => id !== undefined) as number[]
-    // 批量加载头像
-    await loadUserAvatars(senderIds)
-    
-    messages.value = history.map(msg => ({
-      id: msg.id,
-      sender: msg.senderNickname || `用户${msg.senderId}`,
-      content: msg.contentType === 'image' ? msg.content : convertEmojiCodesInText(msg.content),
-      time: formatTime(msg.sentAt),
-      senderId: msg.senderId,
-      senderAvatar: userAvatarCache.value.get(msg.senderId || 0) || null,
-      contentType: msg.contentType || 'text'
-    })).reverse() // 反转，最新的在底部
-    
-    // 滚动到底部
-    await nextTick()
-    scrollToBottom()
-    // 延迟再次滚动，确保DOM完全渲染
-    setTimeout(() => scrollToBottom(), 100)
-  } catch (error) {
-    console.error('加载消息失败:', error)
-  } finally {
-    loading.value = false
-  }
-}
-
-  // 切换会话
 const switchSession = async (sessionId: number) => {
   if (currentSessionId.value === sessionId) return
-  
+
   // 停止旧会话的统计刷新
   stopMemberStatsRefresh()
-  
+
   currentSessionId.value = sessionId
   wsService.setCurrentSessionId(sessionId)
-  
+
   // 移动端切换会话后关闭侧边栏
   if (window.innerWidth <= 768) {
     showSidebar.value = false
   }
-  
+
   await loadMessages(sessionId)
   // 订阅新会话的消息
   if (wsConnected.value || wsService.isConnected()) {
     wsService.subscribeToSession(sessionId, handleMessage)
   }
-  
+
   // 加载新会话的成员统计
   await loadMembersData()
   startMemberStatsRefresh()
 }
 
-// 发送消息
-const sendMessage = () => {
-  if (!inputMessage.value.trim() || !currentSessionId.value) return
-  
-  // 发送原始内容（包含表情代码），后端会自动转换
-  const success = wsService.sendMessage(
-    currentSessionId.value,
-    inputMessage.value.trim(),
-    'text'
-  )
-  
-  if (success) {
-    inputMessage.value = ''
-    showEmojiPicker.value = false
-  } else {
-    console.error('发送消息失败，WebSocket 未连接')
-  }
-}
-
-// 表情选择器相关
-const toggleEmojiPicker = () => {
-  showEmojiPicker.value = !showEmojiPicker.value
-}
-
-const closeEmojiPicker = () => {
-  showEmojiPicker.value = false
-}
-
-const selectEmoji = (code: string) => {
-  // 在光标位置插入表情代码，如果没有光标则在末尾插入
-  const input = inputMessage.value
-  const cursorPos = (document.querySelector('.message-input') as HTMLInputElement)?.selectionStart || input.length
-  
-  inputMessage.value = input.slice(0, cursorPos) + code + input.slice(cursorPos)
-  showEmojiPicker.value = false
-  
-  // 聚焦输入框
-  nextTick(() => {
-    const inputEl = document.querySelector('.message-input') as HTMLInputElement
-    if (inputEl) {
-      inputEl.focus()
-      const newPos = cursorPos + code.length
-      inputEl.setSelectionRange(newPos, newPos)
-    }
-  })
-}
-
-// 图片上传相关
-const handleImageSelect = () => {
-  imageFileInput.value?.click()
-}
-
-const handleImageFileChange = async (event: Event) => {
-  const target = event.target as HTMLInputElement
-  const file = target.files?.[0]
-  if (!file) return
-
-  // 验证文件类型
-  if (!file.type.startsWith('image/')) {
-    showError('请选择图片文件')
-    return
-  }
-
-  // 验证文件大小（10MB）
-  if (file.size > 10 * 1024 * 1024) {
-    showError('图片大小不能超过10MB')
-    return
-  }
-
-  if (!currentSessionId.value) {
-    showError('请先选择会话')
-    return
-  }
-
-  try {
-    uploadingImage.value = true
-    // 上传图片到OSS
-    const imageUrl = await uploadChatImage(file)
-    
-    // 发送图片消息
-    const success = wsService.sendMessage(
-      currentSessionId.value,
-      imageUrl,
-      'image'
-    )
-    
-    if (!success) {
-      showError('发送图片失败，WebSocket 未连接')
-    }
-  } catch (error) {
-    handleApiError(error)
-    showError('上传图片失败')
-  } finally {
-    uploadingImage.value = false
-    // 清空文件选择
-    if (target) {
-      target.value = ''
-    }
-  }
-}
-
-// 图片预览相关
-const openImagePreview = (imageUrl: string) => {
-  previewImageUrl.value = imageUrl
-  showImagePreview.value = true
-}
-
-const closeImagePreview = () => {
-  showImagePreview.value = false
-  previewImageUrl.value = null
-}
-
-// 注意：getMessageBackgroundColor 已从 utils/color 导入，直接使用即可
-
-// 处理接收到的消息
-const handleMessage = async (message: ChatMessage) => {
-  console.log('handleMessage 被调用:', {
-    messageSessionId: message.sessionId,
-    currentSessionId: currentSessionId.value,
-    message: message
-  })
-  
-  // 只处理当前会话的消息
-  if (message.sessionId === currentSessionId.value) {
-    // 检查消息是否已存在（避免重复显示）
-    // 使用消息ID来判断，如果ID相同则认为是重复消息
-    if (message.id) {
-      const exists = messages.value.some(msg => msg.id === message.id)
-      if (exists) {
-        console.log('消息已存在，跳过:', message.id, message.content)
-        return
-      }
-    }
-    
-    // 添加新消息
-    // 确保使用正确的发送者昵称，如果为空则使用用户名或用户ID
-    const senderName = message.senderNickname || 
-                      (message.senderId ? `用户${message.senderId}` : '未知用户')
-    
-    // 获取发送者头像
-    let senderAvatar: string | null = null
-    if (message.senderId) {
-      try {
-        senderAvatar = await getUserAvatar(message.senderId)
-      } catch (error) {
-        console.error('获取发送者头像失败:', error)
-        senderAvatar = null
-      }
-    }
-    
-    // 确保表情代码被转换（双重保障，后端已经转换了）
-    const displayContent = message.contentType === 'image' 
-      ? message.content 
-      : convertEmojiCodesInText(message.content)
-    
-    messages.value.push({
-      id: message.id || Date.now(),
-      sender: senderName,
-      content: displayContent,
-      time: formatTime(message.sentAt),
-      senderId: message.senderId,
-      senderAvatar,
-      contentType: message.contentType || 'text'
-    })
-    
-    console.log('添加消息到列表:', {
-      id: message.id,
-      senderId: message.senderId,
-      senderNickname: message.senderNickname,
-      sender: senderName,
-      content: message.content
-    })
-    
-    nextTick(() => {
-      scrollToBottom(true) // 新消息使用平滑滚动
-    })
-  } else {
-    console.warn('消息会话ID不匹配，跳过:', {
-      messageSessionId: message.sessionId,
-      currentSessionId: currentSessionId.value
-    })
-  }
-}
-
-// 滚动到底部（平滑滚动）
-const scrollToBottom = (smooth = false) => {
-  if (messagesContainer.value) {
-    if (smooth) {
-      messagesContainer.value.scrollTo({
-        top: messagesContainer.value.scrollHeight,
-        behavior: 'smooth'
-      })
-    } else {
-      messagesContainer.value.scrollTop = messagesContainer.value.scrollHeight
-    }
-  }
-}
-
-// 切换移动端侧边栏
 const toggleSidebar = () => {
   showSidebar.value = !showSidebar.value
 }
 
-// 退出登录
 const handleLogout = () => {
   wsService.disconnect()
   clearAuth()
@@ -684,6 +435,12 @@ const stopMemberStatsRefresh = () => {
   }
 }
 
+const handleResize = () => {
+  if (window.innerWidth > 768) {
+    showSidebar.value = false
+  }
+}
+
 onMounted(async () => {
   // 从本地存储读取用户信息和Token
   const user = getUser<UserInfo>()
@@ -755,13 +512,6 @@ onMounted(async () => {
     }
   }, 500)
 })
-
-// 监听窗口大小变化，自动关闭移动端侧边栏
-const handleResize = () => {
-  if (window.innerWidth > 768) {
-    showSidebar.value = false
-  }
-}
 
 onUnmounted(() => {
   // 移除窗口大小变化监听
@@ -880,114 +630,30 @@ onUnmounted(() => {
         class="chat-messages" 
         v-if="currentSessionId"
       >
-        <div v-if="loading" class="loading">加载中...</div>
-        <div v-else-if="messages.length === 0" class="empty-messages">暂无消息</div>
-        <div v-else class="messages-list">
-          <div 
-            v-for="msg in messages" 
-            :key="msg.id" 
-            class="message"
-            :class="{ 'own-message': msg.senderId === currentUser?.id }"
-          >
-            <div 
-              class="message-avatar"
-              @click="msg.senderId && openUserDetail(msg.senderId)"
-              :title="`点击查看 ${msg.sender} 的详情`"
-            >
-              <img 
-                v-if="msg.senderAvatar" 
-                :src="msg.senderAvatar" 
-                :alt="msg.sender"
-                class="avatar-img"
-                @error="msg.senderAvatar = null"
-              />
-              <div v-else class="avatar-placeholder">
-                {{ msg.sender?.[0] || 'U' }}
-              </div>
-            </div>
-            <div class="message-body">
-              <div class="message-meta">
-                <span class="sender">{{ msg.sender }}</span>
-                <span class="time">{{ msg.time }}</span>
-              </div>
-              <div 
-                class="message-content"
-                :style="msg.senderId !== currentUser?.id ? { 
-                  backgroundColor: getMessageBackgroundColor(msg.senderId),
-                  color: '#ffffff'
-                } : {}"
-              >
-                <!-- 图片消息 -->
-                <img 
-                  v-if="msg.contentType === 'image'"
-                  :src="msg.content"
-                  :alt="msg.sender + ' 的图片'"
-                  class="message-image"
-                  @click="openImagePreview(msg.content)"
-                  @error="(e) => { const target = e.target as HTMLImageElement; if (target) target.style.display = 'none' }"
-                />
-                <!-- 文本消息 -->
-                <span v-else>{{ msg.content }}</span>
-              </div>
-            </div>
-          </div>
-        </div>
+        <ChatMessageList
+          :loading="loading"
+          :messages="messages"
+          :current-user-id="currentUser?.id"
+          @open-user-detail="openUserDetail"
+          @open-image-preview="openImagePreview"
+        />
       </section>
       <section v-else class="chat-messages empty-state">
         <p>请从左侧选择一个会话开始聊天</p>
       </section>
 
-      <footer class="chat-input" v-if="currentSessionId">
-        <div class="input-wrapper" style="position: relative;">
-          <button 
-            @click="handleImageSelect"
-            class="image-btn"
-            type="button"
-            :disabled="!wsConnected || uploadingImage"
-            title="上传图片"
-          >
-            📷
-          </button>
-          <input
-            ref="imageFileInput"
-            type="file"
-            accept="image/*"
-            style="display: none"
-            @change="handleImageFileChange"
-          />
-          <button 
-            @click="toggleEmojiPicker"
-            class="emoji-btn"
-            type="button"
-            :disabled="!wsConnected"
-            title="表情"
-          >
-            😊
-          </button>
-          <EmojiPicker 
-            v-if="showEmojiPicker"
-            :show="showEmojiPicker"
-            @select="selectEmoji"
-            @close="closeEmojiPicker"
-          />
-          <input
-            v-model="inputMessage"
-            @keyup.enter="sendMessage"
-            @click="showEmojiPicker = false"
-            type="text"
-            placeholder="输入消息..."
-            class="message-input"
-            :disabled="!wsConnected"
-          />
-        </div>
-        <button 
-          @click="sendMessage" 
-          class="send-btn"
-          :disabled="!wsConnected || !inputMessage.trim()"
-        >
-          发送
-        </button>
-      </footer>
+      <ChatComposer
+        v-if="currentSessionId"
+        v-model="inputMessage"
+        :ws-connected="wsConnected"
+        :uploading-image="uploadingImage"
+        :show-emoji-picker="showEmojiPicker"
+        @send="sendMessage"
+        @toggle-emoji="toggleEmojiPicker"
+        @close-emoji="closeEmojiPicker"
+        @select-emoji="selectEmoji"
+        @image-selected="handleImageFileChange"
+      />
 
       <!-- 图片预览弹窗 -->
       <div v-if="showImagePreview" class="image-preview-overlay" @click="closeImagePreview">
@@ -1436,191 +1102,6 @@ onUnmounted(() => {
   -webkit-overflow-scrolling: touch;
 }
 
-.messages-list {
-  display: flex;
-  flex-direction: column;
-  gap: 16px;
-  min-height: min-content;
-}
-
-.message {
-  display: flex;
-  flex-direction: row;
-  gap: 12px;
-  max-width: 70%;
-  min-width: 0;
-  width: fit-content;
-  align-items: flex-start;
-  animation: messageSlideIn 0.3s ease-out;
-}
-
-/* 让他人消息的消息内容与头像顶部对齐 */
-.message:not(.own-message) {
-  align-items: flex-start;
-}
-
-/* 让他人消息的 message-body 整体上移，使消息框与头像顶部对齐 */
-.message:not(.own-message) .message-body {
-  gap: 4px;
-  margin-top: -18px; /* 上移 message-body，使消息框与头像顶部对齐 */
-}
-
-/* 补偿 margin-top 的影响，统一消息之间的间距 */
-.message:not(.own-message) {
-  margin-bottom: 18px; /* 补偿 message-body 的 margin-top，保持与自己的消息间距一致 */
-}
-
-.message:not(.own-message) .message-meta {
-  margin-bottom: 1px;
-  height: 16px;
-  line-height: 16px;
-  font-size: 12px;
-}
-
-.message.own-message {
-  flex-direction: row-reverse;
-  align-self: flex-end;
-  margin-left: auto;
-  align-items: flex-end;
-  justify-content: flex-end;
-}
-
-.message-body {
-  display: flex;
-  flex-direction: column;
-  gap: 4px;
-  flex: 1;
-  min-width: 0;
-  justify-content: flex-start;
-  align-items: flex-start;
-}
-
-
-.message.own-message .message-body {
-  flex: 0 1 auto;
-  align-items: flex-end;
-  max-width: 100%;
-}
-
-@keyframes messageSlideIn {
-  from {
-    opacity: 0;
-    transform: translateY(10px);
-  }
-  to {
-    opacity: 1;
-    transform: translateY(0);
-  }
-}
-
-.message-avatar {
-  width: 40px;
-  height: 40px;
-  border-radius: 50%;
-  flex-shrink: 0;
-  cursor: pointer;
-  transition: transform 0.2s;
-  overflow: hidden;
-  background: #333;
-  display: flex;
-  align-items: center;
-  justify-content: center;
-}
-
-.message-avatar:hover {
-  transform: scale(1.05);
-}
-
-.avatar-img {
-  width: 100%;
-  height: 100%;
-  object-fit: cover;
-  image-rendering: auto;
-}
-
-.detail-avatar-img {
-  image-rendering: auto;
-}
-
-.avatar-placeholder {
-  width: 100%;
-  height: 100%;
-  display: flex;
-  align-items: center;
-  justify-content: center;
-  background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
-  color: white;
-  font-weight: 600;
-  font-size: 16px;
-}
-
-.message-meta {
-  display: flex;
-  gap: 8px;
-  align-items: center;
-}
-
-.sender {
-  font-weight: 500;
-  color: #667eea;
-  font-size: 14px;
-}
-
-.time {
-  font-size: 12px;
-  color: #666;
-}
-
-.message-content {
-  padding: 10px 14px;
-  background: #2a2a2a;
-  border-radius: 12px;
-  font-size: 14px;
-  line-height: 1.5;
-  word-wrap: break-word;
-  word-break: break-word;
-  box-shadow: 0 2px 4px rgba(0, 0, 0, 0.15);
-  display: inline-block;
-  max-width: 100%;
-  width: fit-content;
-  min-width: 0;
-  white-space: pre-wrap;
-}
-
-/* 消息中的图片样式 */
-.message-image {
-  max-width: 300px;
-  max-height: 400px;
-  border-radius: 8px;
-  cursor: pointer;
-  display: block;
-  object-fit: contain;
-  transition: transform 0.2s;
-}
-
-.message-image:hover {
-  transform: scale(1.02);
-  box-shadow: 0 4px 12px rgba(0, 0, 0, 0.3);
-}
-
-/* 自己的消息样式已在上面定义，这里删除重复定义 */
-
-.message.own-message .message-content {
-  background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
-  color: white;
-  border-bottom-right-radius: 4px;
-}
-
-.message:not(.own-message) .message-content {
-  border-bottom-left-radius: 4px;
-  margin-top: 0;
-}
-
-/* 让他人消息的消息内容与头像顶部对齐 */
-.message:not(.own-message) .message-body {
-  padding-top: 0;
-}
-
 .loading, .empty-messages, .empty-state {
   display: flex;
   align-items: center;
@@ -1628,124 +1109,6 @@ onUnmounted(() => {
   height: 100%;
   color: #666;
   font-size: 14px;
-}
-
-.message-input:disabled {
-  opacity: 0.5;
-  cursor: not-allowed;
-}
-
-.send-btn:disabled {
-  opacity: 0.5;
-  cursor: not-allowed;
-}
-
-.chat-input {
-  padding: 16px 20px;
-  border-top: 1px solid #333;
-  background: #252525;
-  display: flex;
-  gap: 12px;
-  align-items: center;
-}
-
-.input-wrapper {
-  flex: 1;
-  display: flex;
-  align-items: center;
-  gap: 8px;
-  position: relative;
-}
-
-.image-btn {
-  width: 40px;
-  height: 40px;
-  padding: 0;
-  background: #1a1a1a;
-  border: 1px solid #333;
-  border-radius: 6px;
-  color: #e0e0e0;
-  font-size: 20px;
-  cursor: pointer;
-  display: flex;
-  align-items: center;
-  justify-content: center;
-  transition: all 0.2s;
-  flex-shrink: 0;
-}
-
-.image-btn:hover:not(:disabled) {
-  background: #2a2a2a;
-  border-color: #667eea;
-}
-
-.image-btn:disabled {
-  opacity: 0.5;
-  cursor: not-allowed;
-}
-
-.emoji-btn {
-  width: 40px;
-  height: 40px;
-  padding: 0;
-  background: #1a1a1a;
-  border: 1px solid #333;
-  border-radius: 6px;
-  color: #e0e0e0;
-  font-size: 20px;
-  cursor: pointer;
-  display: flex;
-  align-items: center;
-  justify-content: center;
-  transition: all 0.2s;
-  flex-shrink: 0;
-}
-
-.emoji-btn:hover:not(:disabled) {
-  background: #2a2a2a;
-  border-color: #667eea;
-}
-
-.emoji-btn:disabled {
-  opacity: 0.5;
-  cursor: not-allowed;
-}
-
-.message-input {
-  flex: 1;
-  padding: 12px;
-  background: #1a1a1a;
-  border: 1px solid #333;
-  border-radius: 6px;
-  color: #e0e0e0;
-  font-size: 14px;
-}
-
-.message-input:focus {
-  outline: none;
-  border-color: #667eea;
-}
-
-.send-btn {
-  padding: 12px 24px;
-  background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
-  color: white;
-  border: none;
-  border-radius: 6px;
-  font-size: 14px;
-  font-weight: 500;
-  cursor: pointer;
-  transition: opacity 0.2s;
-}
-
-.send-btn:hover:not(:disabled) {
-  opacity: 0.9;
-  transform: translateY(-1px);
-  box-shadow: 0 4px 12px rgba(102, 126, 234, 0.4);
-}
-
-.send-btn:active:not(:disabled) {
-  transform: translateY(0);
 }
 
 /* 响应式设计 - 移动端 */
@@ -1790,40 +1153,6 @@ onUnmounted(() => {
     gap: 12px;
   }
 
-  .message {
-    max-width: 85%;
-    min-width: 0;
-  }
-
-  .message-content {
-    padding: 8px 12px;
-    font-size: 14px;
-  }
-
-  .chat-input {
-    padding: 12px 16px;
-    gap: 8px;
-  }
-
-  .input-wrapper {
-    gap: 6px;
-  }
-
-  .emoji-btn {
-    width: 36px;
-    height: 36px;
-    font-size: 18px;
-  }
-
-  .message-input {
-    padding: 10px;
-    font-size: 14px;
-  }
-
-  .send-btn {
-    padding: 10px 20px;
-    font-size: 14px;
-  }
 
   .user-info {
     padding: 12px 16px;
@@ -1844,9 +1173,6 @@ onUnmounted(() => {
     width: 100%;
   }
 
-  .message {
-    max-width: 90%;
-  }
 
   .chat-header {
     padding-left: 56px;

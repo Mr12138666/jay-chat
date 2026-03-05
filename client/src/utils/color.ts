@@ -7,7 +7,7 @@
  * 预定义的颜色列表（用于不同用户的消息框）
  * 使用柔和的颜色，确保在深色背景下可读
  */
-const USER_COLORS = [
+const USER_COLORS: string[] = [
   '#4a90e2', // 蓝色
   '#50c878', // 绿色
   '#ff6b6b', // 红色
@@ -36,18 +36,17 @@ const USER_COLORS = [
  */
 export function getUserColor(userId: number | undefined): string {
   if (!userId) {
-    return USER_COLORS[0] // 默认颜色
+    return USER_COLORS[0] || '#4a90e2'
   }
-  
-  // 使用简单的哈希算法
-  const index = userId % USER_COLORS.length
-  return USER_COLORS[Math.abs(index)]
+
+  const index = Math.abs(userId % USER_COLORS.length)
+  return USER_COLORS[index] || USER_COLORS[0] || '#4a90e2'
 }
 
 /**
  * 根据颜色计算文字颜色（确保可读性）
  */
-export function getTextColor(backgroundColor: string): string {
+export function getTextColor(_backgroundColor: string): string {
   // 对于深色背景，使用白色文字
   // 对于浅色背景，使用黑色文字
   // 这里我们主要使用深色背景，所以返回白色
