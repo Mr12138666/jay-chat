@@ -1,8 +1,8 @@
 <script setup lang="ts">
 import { ref, onMounted, onUnmounted, nextTick } from 'vue'
 import { useRouter } from 'vue-router'
-import type { UserInfo } from '../api/auth'
-import { updateNickname } from '../api/auth'
+import type { UserInfo, UserDetail } from '../api/auth'
+import { updateNickname, getUserDetail, uploadAvatar } from '../api/auth'
 import { 
   getSessions, 
   getMessages, 
@@ -35,7 +35,11 @@ const messages = ref<Array<{
   content: string
   time: string
   senderId?: number
+  senderAvatar?: string | null
 }>>([])
+
+// 用户头像缓存（userId -> avatar）
+const userAvatarCache = ref<Map<number, string | null>>(new Map())
 
 // 当前输入的消息
 const inputMessage = ref('')
@@ -50,10 +54,20 @@ const messagesContainer = ref<HTMLElement | null>(null)
 // 移动端侧边栏显示状态
 const showSidebar = ref(false)
 
-// 修改昵称相关
+// 用户详情弹窗相关
+const showUserDetail = ref(false)
+const viewingUserId = ref<number | null>(null)
+const userDetail = ref<UserDetail | null>(null)
+const loadingUserDetail = ref(false)
+
+// 修改昵称相关（迁移到详情弹窗）
 const showEditNickname = ref(false)
 const newNickname = ref('')
 const updatingNickname = ref(false)
+
+// 修改头像相关
+const uploadingAvatar = ref(false)
+const avatarFileInput = ref<HTMLInputElement | null>(null)
 
 // 群成员列表相关
 const showMembersList = ref(false)
@@ -127,17 +141,49 @@ const loadSessions = async () => {
   }
 }
 
+// 获取用户头像（带缓存）
+const getUserAvatar = async (userId: number): Promise<string | null> => {
+  if (userAvatarCache.value.has(userId)) {
+    return userAvatarCache.value.get(userId) || null
+  }
+  
+  try {
+    const detail = await getUserDetail(userId)
+    const avatar = detail.avatar
+    userAvatarCache.value.set(userId, avatar)
+    return avatar
+  } catch (error) {
+    console.error('获取用户头像失败:', error)
+    userAvatarCache.value.set(userId, null)
+    return null
+  }
+}
+
+// 批量获取用户头像
+const loadUserAvatars = async (userIds: number[]) => {
+  const uniqueUserIds = [...new Set(userIds)]
+  const promises = uniqueUserIds.map(userId => getUserAvatar(userId))
+  await Promise.all(promises)
+}
+
 // 加载消息历史
 const loadMessages = async (sessionId: number) => {
   try {
     loading.value = true
     const history = await getMessages(sessionId, 1, 50)
+    
+    // 提取所有发送者ID
+    const senderIds = history.map(msg => msg.senderId).filter(id => id !== undefined) as number[]
+    // 批量加载头像
+    await loadUserAvatars(senderIds)
+    
     messages.value = history.map(msg => ({
       id: msg.id,
       sender: msg.senderNickname || `用户${msg.senderId}`,
       content: msg.content,
       time: formatTime(msg.sentAt),
-      senderId: msg.senderId
+      senderId: msg.senderId,
+      senderAvatar: userAvatarCache.value.get(msg.senderId || 0) || null
     })).reverse() // 反转，最新的在底部
     
     // 滚动到底部
@@ -196,7 +242,7 @@ const sendMessage = () => {
 }
 
 // 处理接收到的消息
-const handleMessage = (message: ChatMessage) => {
+const handleMessage = async (message: ChatMessage) => {
   console.log('handleMessage 被调用:', {
     messageSessionId: message.sessionId,
     currentSessionId: currentSessionId.value,
@@ -220,12 +266,19 @@ const handleMessage = (message: ChatMessage) => {
     const senderName = message.senderNickname || 
                       (message.senderId ? `用户${message.senderId}` : '未知用户')
     
+    // 获取发送者头像
+    let senderAvatar: string | null = null
+    if (message.senderId) {
+      senderAvatar = await getUserAvatar(message.senderId)
+    }
+    
     messages.value.push({
       id: message.id || Date.now(),
       sender: senderName,
       content: message.content,
       time: formatTime(message.sentAt),
-      senderId: message.senderId
+      senderId: message.senderId,
+      senderAvatar
     })
     
     console.log('添加消息到列表:', {
@@ -273,9 +326,39 @@ const handleLogout = () => {
   router.push('/login')
 }
 
-// 打开修改昵称弹窗
+// 打开用户详情弹窗
+const openUserDetail = async (userId: number) => {
+  viewingUserId.value = userId
+  showUserDetail.value = true
+  loadingUserDetail.value = true
+  
+  try {
+    userDetail.value = await getUserDetail(userId)
+    // 更新头像缓存
+    if (userDetail.value.avatar !== null) {
+      userAvatarCache.value.set(userId, userDetail.value.avatar)
+    }
+  } catch (error: any) {
+    const errorMessage = handleApiError(error)
+    showError(errorMessage)
+    closeUserDetail()
+  } finally {
+    loadingUserDetail.value = false
+  }
+}
+
+// 关闭用户详情弹窗
+const closeUserDetail = () => {
+  showUserDetail.value = false
+  viewingUserId.value = null
+  userDetail.value = null
+  showEditNickname.value = false
+}
+
+// 打开修改昵称弹窗（在详情弹窗内）
 const openEditNickname = () => {
-  newNickname.value = currentUser.value?.nickname || ''
+  if (!userDetail.value) return
+  newNickname.value = userDetail.value.nickname || ''
   showEditNickname.value = true
 }
 
@@ -294,7 +377,18 @@ const saveNickname = async () => {
     return
   }
   
-  if (nickname === currentUser.value?.nickname) {
+  if (!viewingUserId.value) {
+    showError('用户ID不存在')
+    return
+  }
+  
+  // 只能修改自己的昵称
+  if (viewingUserId.value !== currentUser.value?.id) {
+    showError('只能修改自己的昵称')
+    return
+  }
+  
+  if (nickname === userDetail.value?.nickname) {
     closeEditNickname()
     return
   }
@@ -304,8 +398,13 @@ const saveNickname = async () => {
   try {
     await updateNickname({ nickname })
     
+    // 更新用户详情
+    if (userDetail.value) {
+      userDetail.value.nickname = nickname
+    }
+    
     // 更新本地存储的用户信息
-    if (currentUser.value) {
+    if (currentUser.value && viewingUserId.value === currentUser.value.id) {
       currentUser.value.nickname = nickname
       setUser(currentUser.value)
     }
@@ -317,6 +416,70 @@ const saveNickname = async () => {
     showError(errorMessage)
   } finally {
     updatingNickname.value = false
+  }
+}
+
+// 触发头像文件选择
+const triggerAvatarUpload = () => {
+  if (!viewingUserId.value || viewingUserId.value !== currentUser.value?.id) {
+    showError('只能修改自己的头像')
+    return
+  }
+  avatarFileInput.value?.click()
+}
+
+// 处理头像文件选择
+const handleAvatarFileChange = async (event: Event) => {
+  const target = event.target as HTMLInputElement
+  const file = target.files?.[0]
+  if (!file) return
+  
+  // 验证文件类型
+  if (!file.type.startsWith('image/')) {
+    showError('只能上传图片文件')
+    return
+  }
+  
+  // 验证文件大小（5MB）
+  if (file.size > 5 * 1024 * 1024) {
+    showError('图片大小不能超过5MB')
+    return
+  }
+  
+  if (!viewingUserId.value || viewingUserId.value !== currentUser.value?.id) {
+    showError('只能修改自己的头像')
+    return
+  }
+  
+  uploadingAvatar.value = true
+  
+  try {
+    const avatarUrl = await uploadAvatar(file)
+    
+    // 更新用户详情
+    if (userDetail.value) {
+      userDetail.value.avatar = avatarUrl
+    }
+    
+    // 更新本地存储的用户信息
+    if (currentUser.value) {
+      currentUser.value.avatar = avatarUrl
+      setUser(currentUser.value)
+    }
+    
+    // 更新头像缓存
+    userAvatarCache.value.set(viewingUserId.value, avatarUrl)
+    
+    showSuccess('头像上传成功')
+  } catch (error: any) {
+    const errorMessage = handleApiError(error)
+    showError(errorMessage)
+  } finally {
+    uploadingAvatar.value = false
+    // 清空文件输入
+    if (target) {
+      target.value = ''
+    }
   }
 }
 
@@ -515,16 +678,24 @@ onUnmounted(() => {
       </header>
       
       <div class="user-info">
-        <div class="user-avatar">{{ currentUser?.nickname?.[0] || 'U' }}</div>
+        <div 
+          class="user-avatar"
+          @click="currentUser && openUserDetail(currentUser.id)"
+          :title="`点击查看详情`"
+        >
+          <img 
+            v-if="currentUser?.avatar" 
+            :src="currentUser.avatar" 
+            :alt="currentUser.nickname"
+            class="avatar-img"
+          />
+          <div v-else class="avatar-placeholder">
+            {{ currentUser?.nickname?.[0] || 'U' }}
+          </div>
+        </div>
         <div class="user-details">
           <div class="user-name-wrapper">
             <div class="user-name">{{ currentUser?.nickname || '未知用户' }}</div>
-            <button @click="openEditNickname" class="edit-nickname-btn" title="修改昵称">
-              <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
-                <path d="M11 4H4a2 2 0 0 0-2 2v14a2 2 0 0 0 2 2h14a2 2 0 0 0 2-2v-7"></path>
-                <path d="M18.5 2.5a2.121 2.121 0 0 1 3 3L12 15l-4 1 1-4 9.5-9.5z"></path>
-              </svg>
-            </button>
           </div>
           <div class="user-id">@{{ currentUser?.username }}</div>
         </div>
@@ -597,12 +768,29 @@ onUnmounted(() => {
             class="message"
             :class="{ 'own-message': msg.senderId === currentUser?.id }"
           >
-            <div class="message-meta">
-              <span class="sender">{{ msg.sender }}</span>
-              <span class="time">{{ msg.time }}</span>
+            <div 
+              class="message-avatar"
+              @click="msg.senderId && openUserDetail(msg.senderId)"
+              :title="`点击查看 ${msg.sender} 的详情`"
+            >
+              <img 
+                v-if="msg.senderAvatar" 
+                :src="msg.senderAvatar" 
+                :alt="msg.sender"
+                class="avatar-img"
+              />
+              <div v-else class="avatar-placeholder">
+                {{ msg.sender?.[0] || 'U' }}
+              </div>
             </div>
-            <div class="message-content">
-              {{ msg.content }}
+            <div class="message-body">
+              <div class="message-meta">
+                <span class="sender">{{ msg.sender }}</span>
+                <span class="time">{{ msg.time }}</span>
+              </div>
+              <div class="message-content">
+                {{ msg.content }}
+              </div>
             </div>
           </div>
         </div>
@@ -630,7 +818,104 @@ onUnmounted(() => {
       </footer>
     </main>
 
-    <!-- 修改昵称弹窗 -->
+    <!-- 用户详情弹窗 -->
+    <div v-if="showUserDetail" class="modal-overlay" @click="closeUserDetail">
+      <div class="modal-content user-detail-modal" @click.stop>
+        <div class="modal-header">
+          <h3>用户详情</h3>
+          <button @click="closeUserDetail" class="modal-close-btn">×</button>
+        </div>
+        <div class="modal-body user-detail-body">
+          <div v-if="loadingUserDetail" class="loading-detail">加载中...</div>
+          <div v-else-if="userDetail" class="user-detail-content">
+            <!-- 头像区域 -->
+            <div class="detail-avatar-section">
+              <div class="detail-avatar-wrapper">
+                <img 
+                  v-if="userDetail.avatar" 
+                  :src="userDetail.avatar" 
+                  :alt="userDetail.nickname"
+                  class="detail-avatar-img"
+                />
+                <div v-else class="detail-avatar-placeholder">
+                  {{ userDetail.nickname?.[0] || 'U' }}
+                </div>
+                <!-- 如果是自己，显示修改头像按钮 -->
+                <button 
+                  v-if="viewingUserId === currentUser?.id"
+                  @click="triggerAvatarUpload"
+                  class="avatar-edit-btn"
+                  :disabled="uploadingAvatar"
+                  title="修改头像"
+                >
+                  <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+                    <path d="M11 4H4a2 2 0 0 0-2 2v14a2 2 0 0 0 2 2h14a2 2 0 0 0 2-2v-7"></path>
+                    <path d="M18.5 2.5a2.121 2.121 0 0 1 3 3L12 15l-4 1 1-4 9.5-9.5z"></path>
+                  </svg>
+                  <span v-if="uploadingAvatar">上传中...</span>
+                  <span v-else>修改头像</span>
+                </button>
+              </div>
+              <input 
+                ref="avatarFileInput"
+                type="file"
+                accept="image/*"
+                style="display: none"
+                @change="handleAvatarFileChange"
+              />
+            </div>
+            
+            <!-- 用户信息 -->
+            <div class="detail-info-section">
+              <div class="detail-info-item">
+                <label>昵称</label>
+                <div class="detail-info-value">
+                  <span>{{ userDetail.nickname }}</span>
+                  <span class="detail-username">(@{{ userDetail.username }})</span>
+                  <!-- 如果是自己，显示修改按钮 -->
+                  <button 
+                    v-if="viewingUserId === currentUser?.id"
+                    @click="openEditNickname"
+                    class="edit-btn-small"
+                    title="修改昵称"
+                  >
+                    <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+                      <path d="M11 4H4a2 2 0 0 0-2 2v14a2 2 0 0 0 2 2h14a2 2 0 0 0 2-2v-7"></path>
+                      <path d="M18.5 2.5a2.121 2.121 0 0 1 3 3L12 15l-4 1 1-4 9.5-9.5z"></path>
+                    </svg>
+                  </button>
+                </div>
+              </div>
+              
+              <div class="detail-info-item">
+                <label>用户名</label>
+                <div class="detail-info-value">{{ userDetail.username }}</div>
+              </div>
+              
+              <div class="detail-info-item">
+                <label>注册时间</label>
+                <div class="detail-info-value">{{ formatTime(userDetail.createdAt) }}</div>
+              </div>
+              
+              <div class="detail-info-item" v-if="userDetail.lastLoginAt">
+                <label>上次登录</label>
+                <div class="detail-info-value">{{ formatTime(userDetail.lastLoginAt) }}</div>
+              </div>
+              
+              <div class="detail-info-item" v-if="userDetail.lastMessageAt">
+                <label>上次发言</label>
+                <div class="detail-info-value">{{ formatTime(userDetail.lastMessageAt) }}</div>
+              </div>
+            </div>
+          </div>
+        </div>
+        <div class="modal-footer">
+          <button @click="closeUserDetail" class="btn-close">关闭</button>
+        </div>
+      </div>
+    </div>
+
+    <!-- 修改昵称弹窗（在详情弹窗内显示） -->
     <div v-if="showEditNickname" class="modal-overlay" @click="closeEditNickname">
       <div class="modal-content" @click.stop>
         <div class="modal-header">
@@ -837,6 +1122,27 @@ onUnmounted(() => {
   font-weight: bold;
   color: white;
   flex-shrink: 0;
+  cursor: pointer;
+  transition: transform 0.2s;
+  overflow: hidden;
+}
+
+.user-avatar:hover {
+  transform: scale(1.05);
+}
+
+.user-avatar .avatar-img {
+  width: 100%;
+  height: 100%;
+  object-fit: cover;
+}
+
+.user-avatar .avatar-placeholder {
+  width: 100%;
+  height: 100%;
+  display: flex;
+  align-items: center;
+  justify-content: center;
 }
 
 .user-details {
@@ -1028,10 +1334,22 @@ onUnmounted(() => {
 
 .message {
   display: flex;
-  flex-direction: column;
-  gap: 6px;
+  flex-direction: row;
+  gap: 12px;
   max-width: 75%;
   animation: messageSlideIn 0.3s ease-out;
+}
+
+.message.own-message {
+  flex-direction: row-reverse;
+  align-self: flex-end;
+}
+
+.message-body {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+  flex: 1;
 }
 
 @keyframes messageSlideIn {
@@ -1043,6 +1361,42 @@ onUnmounted(() => {
     opacity: 1;
     transform: translateY(0);
   }
+}
+
+.message-avatar {
+  width: 40px;
+  height: 40px;
+  border-radius: 50%;
+  flex-shrink: 0;
+  cursor: pointer;
+  transition: transform 0.2s;
+  overflow: hidden;
+  background: #333;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+}
+
+.message-avatar:hover {
+  transform: scale(1.05);
+}
+
+.avatar-img {
+  width: 100%;
+  height: 100%;
+  object-fit: cover;
+}
+
+.avatar-placeholder {
+  width: 100%;
+  height: 100%;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
+  color: white;
+  font-weight: 600;
+  font-size: 16px;
 }
 
 .message-meta {
@@ -1298,6 +1652,146 @@ onUnmounted(() => {
   to {
     transform: rotate(360deg);
   }
+}
+
+/* 用户详情弹窗样式 */
+.user-detail-modal {
+  max-width: 500px;
+  width: 90%;
+}
+
+.user-detail-body {
+  padding: 24px;
+}
+
+.loading-detail {
+  text-align: center;
+  padding: 40px;
+  color: #999;
+}
+
+.user-detail-content {
+  display: flex;
+  flex-direction: column;
+  gap: 24px;
+}
+
+.detail-avatar-section {
+  display: flex;
+  justify-content: center;
+}
+
+.detail-avatar-wrapper {
+  position: relative;
+  width: 120px;
+  height: 120px;
+}
+
+.detail-avatar-img,
+.detail-avatar-placeholder {
+  width: 120px;
+  height: 120px;
+  border-radius: 50%;
+  object-fit: cover;
+  border: 3px solid #667eea;
+}
+
+.detail-avatar-placeholder {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
+  color: white;
+  font-size: 48px;
+  font-weight: 600;
+}
+
+.avatar-edit-btn {
+  position: absolute;
+  bottom: 0;
+  right: 0;
+  width: 36px;
+  height: 36px;
+  border-radius: 50%;
+  background: #667eea;
+  border: 2px solid #1a1a1a;
+  color: white;
+  cursor: pointer;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  transition: all 0.2s;
+  font-size: 10px;
+  flex-direction: column;
+  gap: 2px;
+  padding: 2px;
+}
+
+.avatar-edit-btn:hover:not(:disabled) {
+  background: #5568d3;
+  transform: scale(1.1);
+}
+
+.avatar-edit-btn:disabled {
+  opacity: 0.6;
+  cursor: not-allowed;
+}
+
+.avatar-edit-btn svg {
+  width: 14px;
+  height: 14px;
+}
+
+.detail-info-section {
+  display: flex;
+  flex-direction: column;
+  gap: 16px;
+}
+
+.detail-info-item {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+}
+
+.detail-info-item label {
+  font-size: 12px;
+  color: #999;
+  font-weight: 500;
+}
+
+.detail-info-value {
+  font-size: 14px;
+  color: #fff;
+  display: flex;
+  align-items: center;
+  gap: 8px;
+}
+
+.detail-username {
+  color: #999;
+  font-size: 13px;
+}
+
+.edit-btn-small {
+  width: 20px;
+  height: 20px;
+  padding: 0;
+  background: transparent;
+  border: none;
+  color: #667eea;
+  cursor: pointer;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  border-radius: 4px;
+  transition: all 0.2s;
+  margin-left: auto;
+}
+
+.edit-btn-small:hover {
+  background: rgba(102, 126, 234, 0.1);
+  color: #5568d3;
 }
 
 /* 修改昵称弹窗样式 */
@@ -1659,7 +2153,7 @@ onUnmounted(() => {
     max-height: 85vh;
   }
 
-  .members-list-body {
+  .members-list_body {
     max-height: 400px;
   }
 

@@ -5,6 +5,7 @@ import com.sunrisejay.jaychat.common.util.JwtUtil;
 import com.sunrisejay.jaychat.dto.request.LoginRequest;
 import com.sunrisejay.jaychat.dto.request.RegisterRequest;
 import com.sunrisejay.jaychat.dto.response.LoginResponse;
+import com.sunrisejay.jaychat.dto.response.UserDetailResponse;
 import com.sunrisejay.jaychat.entity.User;
 import com.sunrisejay.jaychat.mapper.UserMapper;
 import org.slf4j.Logger;
@@ -27,11 +28,13 @@ public class AuthService {
 
     private final UserMapper userMapper;
     private final JwtUtil jwtUtil;
+    private final OssService ossService;
     private final PasswordEncoder passwordEncoder = new BCryptPasswordEncoder();
 
-    public AuthService(UserMapper userMapper, JwtUtil jwtUtil) {
+    public AuthService(UserMapper userMapper, JwtUtil jwtUtil, OssService ossService) {
         this.userMapper = userMapper;
         this.jwtUtil = jwtUtil;
+        this.ossService = ossService;
     }
 
     /**
@@ -78,6 +81,9 @@ public class AuthService {
             throw new BusinessException("密码错误");
         }
         
+        // 更新上次登录时间
+        userMapper.updateLastLoginAt(user.getId());
+        
         String token = jwtUtil.generateToken(user.getId(), user.getUsername());
         LoginResponse resp = new LoginResponse();
         resp.setToken(token);
@@ -105,7 +111,57 @@ public class AuthService {
             throw new BusinessException("更新昵称失败");
         }
         logger.info("用户昵称更新成功: userId={}, newNickname={}", userId, nickname);
+    }
 
+    /**
+     * 更新用户头像
+     */
+    public void updateAvatar(Long userId, String avatarUrl) {
+        if (!StringUtils.hasText(avatarUrl)) {
+            throw new BusinessException("头像URL不能为空");
+        }
+        User user = userMapper.selectById(userId);
+        if (user == null) {
+            logger.warn("更新头像失败，用户不存在: userId={}", userId);
+            throw new BusinessException("用户不存在");
+        }
+        
+        // 如果用户已有头像，删除旧头像（可选，节省存储空间）
+        if (user.getAvatar() != null && !user.getAvatar().isEmpty()) {
+            try {
+                ossService.deleteFile(user.getAvatar());
+            } catch (Exception e) {
+                logger.warn("删除旧头像失败: userId={}, avatar={}", userId, user.getAvatar(), e);
+                // 继续执行，不因为删除失败而中断
+            }
+        }
+        
+        int result = userMapper.updateAvatar(userId, avatarUrl);
+        if (result == 0) {
+            logger.warn("更新头像失败，数据库操作未成功: userId={}", userId);
+            throw new BusinessException("更新头像失败");
+        }
+        logger.info("用户头像更新成功: userId={}, avatarUrl={}", userId, avatarUrl);
+    }
 
+    /**
+     * 获取用户详情
+     */
+    public UserDetailResponse getUserDetail(Long userId) {
+        User user = userMapper.selectById(userId);
+        if (user == null) {
+            throw new BusinessException("用户不存在");
+        }
+        
+        UserDetailResponse response = new UserDetailResponse();
+        response.setUserId(user.getId());
+        response.setUsername(user.getUsername());
+        response.setNickname(user.getNickname());
+        response.setAvatar(user.getAvatar());
+        response.setLastLoginAt(user.getLastLoginAt());
+        response.setLastMessageAt(user.getLastMessageAt());
+        response.setCreatedAt(user.getCreatedAt());
+        
+        return response;
     }
 }

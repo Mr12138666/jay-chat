@@ -73,6 +73,9 @@ public class ChatService {
         message.setContent(request.getContent());
         message.setContentType(request.getContentType());
         messageMapper.insert(message);
+        
+        // 更新用户的上次发言时间
+        userMapper.updateLastMessageAt(senderId);
 
         // 构建响应
         MessageResponse response = new MessageResponse();

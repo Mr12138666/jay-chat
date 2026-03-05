@@ -28,4 +28,19 @@ public interface UserMapper {
     int insert(User user);
 
     int updateNickname(@Param("id") Long id, @Param("nickname") String nickname);
+
+    /**
+     * 更新头像
+     */
+    int updateAvatar(@Param("id") Long id, @Param("avatar") String avatar);
+
+    /**
+     * 更新上次登录时间
+     */
+    int updateLastLoginAt(@Param("id") Long id);
+
+    /**
+     * 更新上次发言时间
+     */
+    int updateLastMessageAt(@Param("id") Long id);
 }

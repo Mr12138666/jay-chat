@@ -1,36 +1,18 @@
-package com.sunrisejay.jaychat.entity;
+package com.sunrisejay.jaychat.dto.response;
 
 import lombok.Data;
-
 import java.time.LocalDateTime;
 
 /**
- * 用户实体
+ * 用户详情响应DTO
  */
 @Data
-public class User {
-
-    private Long id;
-
+public class UserDetailResponse {
+    private Long userId;
     private String username;
-
-    private String password;
-
     private String nickname;
-
     private String avatar;
-
-    /**
-     * 上次登录时间
-     */
     private LocalDateTime lastLoginAt;
-
-    /**
-     * 上次发言时间
-     */
     private LocalDateTime lastMessageAt;
-
     private LocalDateTime createdAt;
-
-    private LocalDateTime updatedAt;
 }

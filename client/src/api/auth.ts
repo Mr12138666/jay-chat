@@ -53,3 +53,30 @@ export interface UpdateNicknameRequest {
 export const updateNickname = (data: UpdateNicknameRequest): Promise<void> => {
   return request.put('/api/auth/nickname', data)
 }
+
+// 用户详情信息
+export interface UserDetail {
+  userId: number
+  username: string
+  nickname: string
+  avatar: string | null
+  lastLoginAt: string | null
+  lastMessageAt: string | null
+  createdAt: string
+}
+
+// 获取用户详情接口
+export const getUserDetail = (userId: number): Promise<UserDetail> => {
+  return request.get(`/api/auth/users/${userId}`)
+}
+
+// 上传头像接口
+export const uploadAvatar = (file: File): Promise<string> => {
+  const formData = new FormData()
+  formData.append('file', file)
+  return request.post('/api/auth/avatar', formData, {
+    headers: {
+      'Content-Type': 'multipart/form-data'
+    }
+  })
+}

@@ -6,9 +6,13 @@ import com.sunrisejay.jaychat.dto.request.LoginRequest;
 import com.sunrisejay.jaychat.dto.request.RegisterRequest;
 import com.sunrisejay.jaychat.dto.request.UpdateNicknameRequest;
 import com.sunrisejay.jaychat.dto.response.LoginResponse;
+import com.sunrisejay.jaychat.dto.response.UserDetailResponse;
 import com.sunrisejay.jaychat.service.AuthService;
+import com.sunrisejay.jaychat.service.OssService;
 import io.jsonwebtoken.Claims;
 import org.springframework.web.bind.annotation.*;
+
+import org.springframework.web.multipart.MultipartFile;
 
 import javax.servlet.http.HttpServletRequest;
 import javax.validation.Valid;
@@ -23,10 +27,12 @@ public class AuthController {
 
     private final AuthService authService;
     private final JwtTokenUtil jwtTokenUtil;
+    private final OssService ossService;
 
-    public AuthController(AuthService authService, JwtTokenUtil jwtTokenUtil) {
+    public AuthController(AuthService authService, JwtTokenUtil jwtTokenUtil, OssService ossService) {
         this.authService = authService;
         this.jwtTokenUtil = jwtTokenUtil;
+        this.ossService = ossService;
     }
 
     /**
@@ -65,7 +71,6 @@ public class AuthController {
      */
     @PutMapping("/nickname")
     public ApiResponse<Void> updateNickname(@Valid @RequestBody UpdateNicknameRequest request, HttpServletRequest httpRequest) {
-
         Long userId = jwtTokenUtil.getUserIdFromRequest(httpRequest);
         if (userId == null) {
             return ApiResponse.error(401, "未登录");
@@ -73,7 +78,43 @@ public class AuthController {
 
         authService.updateNickname(userId, request.getNickname());
         return ApiResponse.success(null);
+    }
 
+    /**
+     * 获取用户详情
+     */
+    @GetMapping("/users/{userId}")
+    public ApiResponse<UserDetailResponse> getUserDetail(
+            @PathVariable Long userId,
+            HttpServletRequest request) {
+        Long currentUserId = jwtTokenUtil.getUserIdFromRequest(request);
+        if (currentUserId == null) {
+            return ApiResponse.error(401, "未登录");
+        }
+
+        UserDetailResponse userDetail = authService.getUserDetail(userId);
+        return ApiResponse.success(userDetail);
+    }
+
+    /**
+     * 上传头像
+     */
+    @PostMapping("/avatar")
+    public ApiResponse<String> uploadAvatar(
+            @RequestParam("file") MultipartFile file,
+            HttpServletRequest httpRequest) {
+        Long userId = jwtTokenUtil.getUserIdFromRequest(httpRequest);
+        if (userId == null) {
+            return ApiResponse.error(401, "未登录");
+        }
+
+        // 上传文件到OSS
+        String avatarUrl = ossService.uploadFile(file, userId);
+        
+        // 更新用户头像
+        authService.updateAvatar(userId, avatarUrl);
+        
+        return ApiResponse.success(avatarUrl);
     }
 
 
