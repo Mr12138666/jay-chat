@@ -1,0 +1,37 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE mapper
+        PUBLIC "-//mybatis.org//DTD Mapper 3.0//EN"
+        "http://mybatis.org/dtd/mybatis-3-mapper.dtd">
+<mapper namespace="com.sunrisejay.jaychat.user.mapper.UserMapper">
+
+    <resultMap id="UserResultMap" type="com.sunrisejay.jaychat.user.User">
+        <id column="id" property="id"/>
+        <result column="username" property="username"/>
+        <result column="password" property="password"/>
+        <result column="nickname" property="nickname"/>
+        <result column="avatar" property="avatar"/>
+        <result column="created_at" property="createdAt"/>
+        <result column="updated_at" property="updatedAt"/>
+    </resultMap>
+
+    <select id="findByUsername" resultMap="UserResultMap">
+        SELECT id, username, password, nickname, avatar, created_at, updated_at
+        FROM `user`
+        WHERE username = #{username}
+        LIMIT 1
+    </select>
+
+    <insert id="insert" parameterType="com.sunrisejay.jaychat.user.User" useGeneratedKeys="true" keyProperty="id">
+        INSERT INTO `user` (username, password, nickname, avatar, created_at, updated_at)
+        VALUES (#{username}, #{password}, #{nickname}, #{avatar}, NOW(), NOW())
+    </insert>
+
+    <select id="selectById" resultMap="UserResultMap">
+        SELECT id, username, password, nickname, avatar, created_at, updated_at
+        FROM `user`
+        WHERE id = #{id}
+        LIMIT 1
+    </select>
+
+</mapper>
+
