@@ -2,6 +2,7 @@ package com.sunrisejay.jaychat.service;
 
 import com.aliyun.oss.OSS;
 import com.aliyun.oss.OSSClientBuilder;
+import com.aliyun.oss.model.ObjectMetadata;
 import com.aliyun.oss.model.PutObjectRequest;
 import com.sunrisejay.jaychat.config.OssProperties;
 import com.sunrisejay.jaychat.common.exception.BusinessException;
@@ -10,7 +11,11 @@ import org.slf4j.LoggerFactory;
 import org.springframework.stereotype.Service;
 import org.springframework.web.multipart.MultipartFile;
 
-import java.io.InputStream;
+import javax.imageio.ImageIO;
+import java.awt.*;
+import java.awt.image.BufferedImage;
+import java.io.ByteArrayInputStream;
+import java.io.ByteArrayOutputStream;
 import java.util.UUID;
 
 /**
@@ -21,6 +26,9 @@ import java.util.UUID;
 public class OssService {
 
     private static final Logger logger = LoggerFactory.getLogger(OssService.class);
+    private static final int AVATAR_SIZE_SMALL = 256;
+    private static final int AVATAR_SIZE_LARGE = 512;
+    private static final int AVATAR_MIN_SIZE = 128;
 
     private final OssProperties ossProperties;
 
@@ -58,6 +66,14 @@ public class OssService {
 
         OSS ossClient = null;
         try {
+            BufferedImage sourceImage = ImageIO.read(file.getInputStream());
+            if (sourceImage == null) {
+                throw new BusinessException("文件内容不是有效图片");
+            }
+            if (sourceImage.getWidth() < AVATAR_MIN_SIZE || sourceImage.getHeight() < AVATAR_MIN_SIZE) {
+                throw new BusinessException("头像分辨率过低，至少需要 " + AVATAR_MIN_SIZE + "x" + AVATAR_MIN_SIZE);
+            }
+
             // 创建OSS客户端
             ossClient = new OSSClientBuilder().build(
                     ossProperties.getEndpoint(),
@@ -65,24 +81,20 @@ public class OssService {
                     ossProperties.getAccessKeySecret()
             );
 
-            // 生成文件路径：avatar/userId/uuid.extension
-            String fileName = generateFileName(userId, fileExtension);
-            String objectName = ossProperties.getPathPrefix() + fileName;
+            // 统一生成方形头像的两个尺寸，默认返回高清版本URL
+            String fileName = generateFileName(userId);
+            String smallObjectName = ossProperties.getPathPrefix() + fileName + "_" + AVATAR_SIZE_SMALL + ".jpg";
+            String largeObjectName = ossProperties.getPathPrefix() + fileName + "_" + AVATAR_SIZE_LARGE + ".jpg";
 
-            // 上传文件
-            InputStream inputStream = file.getInputStream();
-            PutObjectRequest putObjectRequest = new PutObjectRequest(
-                    ossProperties.getBucketName(),
-                    objectName,
-                    inputStream
-            );
-            ossClient.putObject(putObjectRequest);
+            uploadResizedImage(ossClient, sourceImage, smallObjectName, AVATAR_SIZE_SMALL);
+            uploadResizedImage(ossClient, sourceImage, largeObjectName, AVATAR_SIZE_LARGE);
 
-            // 生成文件访问URL
-            String fileUrl = ossProperties.getDomain() + "/" + objectName;
-            logger.info("文件上传成功: userId={}, fileName={}, url={}", userId, fileName, fileUrl);
+            String fileUrl = ossProperties.getDomain() + "/" + largeObjectName;
+            logger.info("头像上传成功: userId={}, small={}, large={}", userId, smallObjectName, largeObjectName);
             return fileUrl;
 
+        } catch (BusinessException e) {
+            throw e;
         } catch (Exception e) {
             logger.error("文件上传失败: userId={}", userId, e);
             throw new BusinessException("文件上传失败: " + e.getMessage());
@@ -117,8 +129,32 @@ public class OssService {
                     ossProperties.getAccessKeySecret()
             );
 
-            ossClient.deleteObject(ossProperties.getBucketName(), objectName);
-            logger.info("文件删除成功: objectName={}", objectName);
+            // 删除当前头像对象
+            try {
+                ossClient.deleteObject(ossProperties.getBucketName(), objectName);
+                logger.info("文件删除成功: objectName={}", objectName);
+            } catch (Exception e) {
+                logger.warn("文件删除失败: objectName={}", objectName, e);
+            }
+
+            // 如果是标准化头像（xxx_256.jpg / xxx_512.jpg），尝试联动删除另一种尺寸
+            if (objectName.endsWith("_" + AVATAR_SIZE_SMALL + ".jpg")) {
+                String other = objectName.replace("_" + AVATAR_SIZE_SMALL + ".jpg", "_" + AVATAR_SIZE_LARGE + ".jpg");
+                try {
+                    ossClient.deleteObject(ossProperties.getBucketName(), other);
+                    logger.info("文件删除成功: objectName={}", other);
+                } catch (Exception e) {
+                    logger.warn("文件删除失败: objectName={}", other, e);
+                }
+            } else if (objectName.endsWith("_" + AVATAR_SIZE_LARGE + ".jpg")) {
+                String other = objectName.replace("_" + AVATAR_SIZE_LARGE + ".jpg", "_" + AVATAR_SIZE_SMALL + ".jpg");
+                try {
+                    ossClient.deleteObject(ossProperties.getBucketName(), other);
+                    logger.info("文件删除成功: objectName={}", other);
+                } catch (Exception e) {
+                    logger.warn("文件删除失败: objectName={}", other, e);
+                }
+            }
         } catch (Exception e) {
             logger.error("文件删除失败: objectName={}", objectName, e);
         } finally {
@@ -128,12 +164,65 @@ public class OssService {
         }
     }
 
+
     /**
-     * 生成文件名
+     * 生成文件名（不含扩展名）
      */
-    private String generateFileName(Long userId, String extension) {
+    private String generateFileName(Long userId) {
         String uuid = UUID.randomUUID().toString().replace("-", "");
-        return userId + "/" + uuid + "." + extension;
+        return userId + "/" + uuid;
+    }
+
+    private void uploadResizedImage(OSS ossClient, BufferedImage source, String objectName, int targetSize) throws Exception {
+        BufferedImage square = cropToSquare(source);
+        BufferedImage resized = resizeImage(square, targetSize, targetSize);
+
+        ByteArrayOutputStream outputStream = new ByteArrayOutputStream();
+        ImageIO.write(resized, "jpg", outputStream);
+        byte[] imageBytes = outputStream.toByteArray();
+
+        ObjectMetadata metadata = new ObjectMetadata();
+        metadata.setContentType("image/jpeg");
+        metadata.setContentLength(imageBytes.length);
+
+        PutObjectRequest putObjectRequest = new PutObjectRequest(
+                ossProperties.getBucketName(),
+                objectName,
+                new ByteArrayInputStream(imageBytes)
+        );
+        putObjectRequest.setMetadata(metadata);
+        ossClient.putObject(putObjectRequest);
+    }
+
+    private BufferedImage cropToSquare(BufferedImage source) {
+        int width = source.getWidth();
+        int height = source.getHeight();
+        int size = Math.min(width, height);
+        int x = (width - size) / 2;
+        int y = (height - size) / 2;
+
+        BufferedImage square = new BufferedImage(size, size, BufferedImage.TYPE_INT_RGB);
+        Graphics2D g2d = square.createGraphics();
+        try {
+            g2d.drawImage(source, 0, 0, size, size, x, y, x + size, y + size, null);
+        } finally {
+            g2d.dispose();
+        }
+        return square;
+    }
+
+    private BufferedImage resizeImage(BufferedImage source, int width, int height) {
+        BufferedImage resized = new BufferedImage(width, height, BufferedImage.TYPE_INT_RGB);
+        Graphics2D g2d = resized.createGraphics();
+        try {
+            g2d.setRenderingHint(RenderingHints.KEY_INTERPOLATION, RenderingHints.VALUE_INTERPOLATION_BICUBIC);
+            g2d.setRenderingHint(RenderingHints.KEY_RENDERING, RenderingHints.VALUE_RENDER_QUALITY);
+            g2d.setRenderingHint(RenderingHints.KEY_ANTIALIASING, RenderingHints.VALUE_ANTIALIAS_ON);
+            g2d.drawImage(source, 0, 0, width, height, null);
+        } finally {
+            g2d.dispose();
+        }
+        return resized;
     }
 
     /**

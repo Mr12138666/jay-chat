@@ -4,8 +4,6 @@ import com.sunrisejay.jaychat.entity.User;
 import org.apache.ibatis.annotations.Mapper;
 import org.apache.ibatis.annotations.Param;
 
-import javax.validation.constraints.NotBlank;
-
 /**
  * 用户数据访问层
  */

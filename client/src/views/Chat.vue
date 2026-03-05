@@ -18,6 +18,8 @@ import { wsService, type ChatMessage } from '../utils/websocket'
 import { formatTime } from '../utils/date'
 import { getUser, getToken, clearAuth, setUser } from '../utils/storage'
 import { handleApiError, showError, showSuccess } from '../utils/error'
+import MembersModal from '../components/chat/MembersModal.vue'
+import { validateAvatarFile, withCacheBuster } from '../utils/avatar'
 
 const router = useRouter()
 
@@ -75,7 +77,6 @@ const members = ref<SessionMember[]>([])
 const memberStats = ref<SessionMemberStats | null>(null)
 const onlineUserIds = ref<Set<number>>(new Set())
 const loadingMembers = ref(false)
-
 
 // 加载会话列表
 const loadSessions = async () => {
@@ -269,7 +270,12 @@ const handleMessage = async (message: ChatMessage) => {
     // 获取发送者头像
     let senderAvatar: string | null = null
     if (message.senderId) {
-      senderAvatar = await getUserAvatar(message.senderId)
+      try {
+        senderAvatar = await getUserAvatar(message.senderId)
+      } catch (error) {
+        console.error('获取发送者头像失败:', error)
+        senderAvatar = null
+      }
     }
     
     messages.value.push({
@@ -433,43 +439,39 @@ const handleAvatarFileChange = async (event: Event) => {
   const target = event.target as HTMLInputElement
   const file = target.files?.[0]
   if (!file) return
-  
-  // 验证文件类型
-  if (!file.type.startsWith('image/')) {
-    showError('只能上传图片文件')
+
+  try {
+    await validateAvatarFile(file)
+  } catch (error: any) {
+    showError(error.message || '头像文件不合法')
     return
   }
-  
-  // 验证文件大小（5MB）
-  if (file.size > 5 * 1024 * 1024) {
-    showError('图片大小不能超过5MB')
-    return
-  }
-  
+
   if (!viewingUserId.value || viewingUserId.value !== currentUser.value?.id) {
     showError('只能修改自己的头像')
     return
   }
-  
+
   uploadingAvatar.value = true
-  
+
   try {
     const avatarUrl = await uploadAvatar(file)
-    
+    const cacheSafeAvatarUrl = withCacheBuster(avatarUrl)
+
     // 更新用户详情
     if (userDetail.value) {
-      userDetail.value.avatar = avatarUrl
+      userDetail.value.avatar = cacheSafeAvatarUrl
     }
-    
+
     // 更新本地存储的用户信息
     if (currentUser.value) {
-      currentUser.value.avatar = avatarUrl
+      currentUser.value.avatar = cacheSafeAvatarUrl
       setUser(currentUser.value)
     }
-    
+
     // 更新头像缓存
-    userAvatarCache.value.set(viewingUserId.value, avatarUrl)
-    
+    userAvatarCache.value.set(viewingUserId.value, cacheSafeAvatarUrl)
+
     showSuccess('头像上传成功')
   } catch (error: any) {
     const errorMessage = handleApiError(error)
@@ -688,6 +690,7 @@ onUnmounted(() => {
             :src="currentUser.avatar" 
             :alt="currentUser.nickname"
             class="avatar-img"
+            @error="currentUser && (currentUser.avatar = null)"
           />
           <div v-else class="avatar-placeholder">
             {{ currentUser?.nickname?.[0] || 'U' }}
@@ -778,6 +781,7 @@ onUnmounted(() => {
                 :src="msg.senderAvatar" 
                 :alt="msg.sender"
                 class="avatar-img"
+                @error="msg.senderAvatar = null"
               />
               <div v-else class="avatar-placeholder">
                 {{ msg.sender?.[0] || 'U' }}
@@ -836,6 +840,7 @@ onUnmounted(() => {
                   :src="userDetail.avatar" 
                   :alt="userDetail.nickname"
                   class="detail-avatar-img"
+                  @error="userDetail && (userDetail.avatar = null)"
                 />
                 <div v-else class="detail-avatar-placeholder">
                   {{ userDetail.nickname?.[0] || 'U' }}
@@ -943,84 +948,14 @@ onUnmounted(() => {
     </div>
 
     <!-- 群成员列表弹窗 -->
-    <div v-if="showMembersList" class="modal-overlay" @click="closeMembersList">
-      <div class="modal-content members-modal" @click.stop>
-        <div class="modal-header">
-          <h3>群成员</h3>
-          <button @click="closeMembersList" class="modal-close-btn">×</button>
-        </div>
-        <div class="modal-body members-list-body">
-          <div v-if="loadingMembers" class="loading-members">加载中...</div>
-          <div v-else-if="members.length === 0" class="empty-members">暂无成员</div>
-          <ul v-else class="members-list">
-            <li v-for="member in members" :key="member.userId" class="member-item">
-              <div class="member-avatar">{{ member.nickname?.[0] || 'U' }}</div>
-              <div class="member-info">
-                <div class="member-name-wrapper">
-                  <span class="member-name">{{ member.nickname }}</span>
-                  <span class="member-username">@{{ member.username }}</span>
-                </div>
-              </div>
-              <div class="member-status">
-                <span v-if="isUserOnline(member.userId)" class="online-indicator" title="在线">
-                  <span class="online-dot-small"></span>
-                </span>
-                <span v-else class="offline-indicator" title="离线">
-                  <span class="offline-dot-small"></span>
-                </span>
-              </div>
-            </li>
-          </ul>
-        </div>
-        <div class="modal-footer members-footer">
-          <div class="members-stats">
-            <span>总人数: {{ memberStats?.totalMembers || 0 }}</span>
-            <span>在线: {{ memberStats?.onlineMembers || 0 }}</span>
-          </div>
-          <button @click="closeMembersList" class="btn-close">关闭</button>
-        </div>
-      </div>
-    </div>
-
-    <!-- 群成员列表弹窗 -->
-    <div v-if="showMembersList" class="modal-overlay" @click="closeMembersList">
-      <div class="modal-content members-modal" @click.stop>
-        <div class="modal-header">
-          <h3>群成员</h3>
-          <button @click="closeMembersList" class="modal-close-btn">×</button>
-        </div>
-        <div class="modal-body members-list-body">
-          <div v-if="loadingMembers" class="loading-members">加载中...</div>
-          <div v-else-if="members.length === 0" class="empty-members">暂无成员</div>
-          <ul v-else class="members-list">
-            <li v-for="member in members" :key="member.userId" class="member-item">
-              <div class="member-avatar">{{ member.nickname?.[0] || 'U' }}</div>
-              <div class="member-info">
-                <div class="member-name-wrapper">
-                  <span class="member-name">{{ member.nickname }}</span>
-                  <span class="member-username">@{{ member.username }}</span>
-                </div>
-              </div>
-              <div class="member-status">
-                <span v-if="isUserOnline(member.userId)" class="online-indicator" title="在线">
-                  <span class="online-dot-small"></span>
-                </span>
-                <span v-else class="offline-indicator" title="离线">
-                  <span class="offline-dot-small"></span>
-                </span>
-              </div>
-            </li>
-          </ul>
-        </div>
-        <div class="modal-footer members-footer">
-          <div class="members-stats">
-            <span>总人数: {{ memberStats?.totalMembers || 0 }}</span>
-            <span>在线: {{ memberStats?.onlineMembers || 0 }}</span>
-          </div>
-          <button @click="closeMembersList" class="btn-close">关闭</button>
-        </div>
-      </div>
-    </div>
+    <MembersModal
+      :show="showMembersList"
+      :loading="loadingMembers"
+      :members="members"
+      :member-stats="memberStats"
+      :is-user-online="isUserOnline"
+      @close="closeMembersList"
+    />
   </div>
 </template>
 
@@ -1385,6 +1320,11 @@ onUnmounted(() => {
   width: 100%;
   height: 100%;
   object-fit: cover;
+  image-rendering: auto;
+}
+
+.detail-avatar-img {
+  image-rendering: auto;
 }
 
 .avatar-placeholder {
@@ -1996,141 +1936,6 @@ onUnmounted(() => {
   animation: pulse 2s infinite;
 }
 
-@keyframes pulse {
-  0%, 100% {
-    opacity: 1;
-  }
-  50% {
-    opacity: 0.5;
-  }
-}
-
-/* 群成员列表弹窗 */
-.members-modal {
-  max-width: 500px;
-  max-height: 80vh;
-  display: flex;
-  flex-direction: column;
-}
-
-.members-list-body {
-  flex: 1;
-  overflow-y: auto;
-  padding: 0;
-  min-height: 300px;
-  max-height: 500px;
-}
-
-.loading-members,
-.empty-members {
-  padding: 40px 24px;
-  text-align: center;
-  color: #999;
-}
-
-.members-list {
-  list-style: none;
-  padding: 0;
-  margin: 0;
-}
-
-.member-item {
-  display: flex;
-  align-items: center;
-  gap: 12px;
-  padding: 12px 24px;
-  border-bottom: 1px solid #333;
-  transition: background 0.2s;
-}
-
-.member-item:hover {
-  background: #2a2a2a;
-}
-
-.member-item:last-child {
-  border-bottom: none;
-}
-
-.member-avatar {
-  width: 40px;
-  height: 40px;
-  border-radius: 50%;
-  background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
-  display: flex;
-  align-items: center;
-  justify-content: center;
-  font-weight: bold;
-  color: white;
-  flex-shrink: 0;
-  font-size: 16px;
-}
-
-.member-info {
-  flex: 1;
-  min-width: 0;
-}
-
-.member-name-wrapper {
-  display: flex;
-  align-items: center;
-  gap: 8px;
-  flex-wrap: wrap;
-}
-
-.member-name {
-  font-size: 14px;
-  font-weight: 500;
-  color: #fff;
-}
-
-.member-username {
-  font-size: 12px;
-  color: #999;
-}
-
-.member-status {
-  flex-shrink: 0;
-}
-
-.online-indicator,
-.offline-indicator {
-  display: flex;
-  align-items: center;
-  justify-content: center;
-}
-
-.online-dot-small {
-  width: 10px;
-  height: 10px;
-  border-radius: 50%;
-  background: #4caf50;
-  display: inline-block;
-  animation: pulse 2s infinite;
-}
-
-.offline-dot-small {
-  width: 10px;
-  height: 10px;
-  border-radius: 50%;
-  background: #666;
-  display: inline-block;
-}
-
-.members-footer {
-  display: flex;
-  align-items: center;
-  justify-content: space-between;
-  padding: 16px 24px;
-  border-top: 1px solid #333;
-}
-
-.members-stats {
-  display: flex;
-  gap: 16px;
-  font-size: 12px;
-  color: #999;
-}
-
 .btn-close {
   padding: 8px 20px;
   background: #333;
@@ -2146,33 +1951,15 @@ onUnmounted(() => {
   background: #3a3a3a;
 }
 
-/* 移动端适配 */
-@media (max-width: 768px) {
-  .members-modal {
-    max-width: 90vw;
-    max-height: 85vh;
+@keyframes pulse {
+  0%, 100% {
+    opacity: 1;
   }
-
-  .members-list_body {
-    max-height: 400px;
-  }
-
-  .member-item {
-    padding: 10px 16px;
-  }
-
-  .members-footer {
-    flex-direction: column;
-    gap: 12px;
-    align-items: stretch;
-  }
-
-  .members-stats {
-    justify-content: space-between;
-  }
-
-  .btn-close {
-    width: 100%;
+  50% {
+    opacity: 0.5;
   }
 }
+
+/* 群成员列表弹窗 */
+/* 已迁移至 components/chat/MembersModal.vue */
 </style>

@@ -84,9 +84,10 @@ class WebSocketService {
     this.currentErrorCallback = onError || null
 
     // 使用 SockJS 作为传输层
-    // 支持环境变量配置，开发环境使用 localhost，生产环境使用实际服务器地址
+    // 开发环境：优先使用 VITE_WS_BASE_URL，未配置时使用本地后端 http://localhost:8080
+    // 生产环境：使用 VITE_WS_BASE_URL 或当前站点同源地址
     const WS_BASE_URL = import.meta.env.VITE_WS_BASE_URL || 
-                       (import.meta.env.DEV ? 'http://localhost:8080' : window.location.origin.replace(/:\d+$/, ':8080'))
+      (import.meta.env.DEV ? 'http://localhost:8080' : window.location.origin)
     const wsUrl = `${WS_BASE_URL}/ws`
     console.log('WebSocket URL:', wsUrl)
     const socket = new SockJS(wsUrl)

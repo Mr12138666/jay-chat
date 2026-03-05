@@ -2,7 +2,6 @@ package com.sunrisejay.jaychat.dto.response;
 
 import lombok.Data;
 
-import java.security.Principal;
 import java.time.LocalDateTime;
 
 /**

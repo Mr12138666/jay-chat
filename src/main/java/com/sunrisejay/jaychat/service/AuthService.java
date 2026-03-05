@@ -1,5 +1,6 @@
 package com.sunrisejay.jaychat.service;
 
+import com.sunrisejay.jaychat.common.converter.UserConverter;
 import com.sunrisejay.jaychat.common.exception.BusinessException;
 import com.sunrisejay.jaychat.common.util.JwtUtil;
 import com.sunrisejay.jaychat.dto.request.LoginRequest;
@@ -29,12 +30,14 @@ public class AuthService {
     private final UserMapper userMapper;
     private final JwtUtil jwtUtil;
     private final OssService ossService;
+    private final UserConverter userConverter;
     private final PasswordEncoder passwordEncoder = new BCryptPasswordEncoder();
 
-    public AuthService(UserMapper userMapper, JwtUtil jwtUtil, OssService ossService) {
+    public AuthService(UserMapper userMapper, JwtUtil jwtUtil, OssService ossService, UserConverter userConverter) {
         this.userMapper = userMapper;
         this.jwtUtil = jwtUtil;
         this.ossService = ossService;
+        this.userConverter = userConverter;
     }
 
     /**
@@ -153,15 +156,6 @@ public class AuthService {
             throw new BusinessException("用户不存在");
         }
         
-        UserDetailResponse response = new UserDetailResponse();
-        response.setUserId(user.getId());
-        response.setUsername(user.getUsername());
-        response.setNickname(user.getNickname());
-        response.setAvatar(user.getAvatar());
-        response.setLastLoginAt(user.getLastLoginAt());
-        response.setLastMessageAt(user.getLastMessageAt());
-        response.setCreatedAt(user.getCreatedAt());
-        
-        return response;
+        return userConverter.toDetailResponse(user);
     }
 }

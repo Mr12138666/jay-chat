@@ -3,9 +3,15 @@ import type { AxiosInstance, InternalAxiosRequestConfig, AxiosResponse } from 'a
 import { getToken, clearAuth } from '../utils/storage'
 
 // 创建 axios 实例
-// 支持环境变量配置，开发环境使用 localhost，生产环境使用实际服务器地址
+// 开发环境：优先使用 VITE_API_BASE_URL，未配置时使用本地后端 http://localhost:8080
+// 生产环境：使用 VITE_API_BASE_URL 或当前站点同源地址
 const API_BASE_URL = import.meta.env.VITE_API_BASE_URL || 
-                     (import.meta.env.DEV ? 'http://localhost:8080' : window.location.origin.replace(/:\d+$/, ':8080'))
+  (import.meta.env.DEV ? 'http://localhost:8080' : window.location.origin)
+
+// 调试日志：输出 API 基础地址
+console.log('API_BASE_URL:', API_BASE_URL)
+console.log('VITE_API_BASE_URL:', import.meta.env.VITE_API_BASE_URL)
+console.log('import.meta.env.DEV:', import.meta.env.DEV)
 
 const request: AxiosInstance = axios.create({
   baseURL: API_BASE_URL,

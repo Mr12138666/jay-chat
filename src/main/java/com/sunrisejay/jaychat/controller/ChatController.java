@@ -1,45 +1,37 @@
 package com.sunrisejay.jaychat.controller;
 
 import com.sunrisejay.jaychat.common.ApiResponse;
-import com.sunrisejay.jaychat.common.util.JwtTokenUtil;
-import com.sunrisejay.jaychat.config.WebSocketAuthInterceptor;
+import com.sunrisejay.jaychat.common.constant.ApiConstants;
+import com.sunrisejay.jaychat.common.constant.WebSocketConstants;
+import com.sunrisejay.jaychat.controller.base.BaseController;
 import com.sunrisejay.jaychat.dto.request.MessageRequest;
 import com.sunrisejay.jaychat.dto.response.MessageResponse;
 import com.sunrisejay.jaychat.dto.response.SessionMemberResponse;
 import com.sunrisejay.jaychat.dto.response.SessionMemberStatsResponse;
 import com.sunrisejay.jaychat.entity.ChatSession;
 import com.sunrisejay.jaychat.service.ChatService;
-import org.slf4j.Logger;
-import org.slf4j.LoggerFactory;
-import org.springframework.messaging.handler.annotation.MessageMapping;
-import org.springframework.messaging.handler.annotation.Payload;
 import org.springframework.messaging.simp.SimpMessagingTemplate;
-import org.springframework.messaging.simp.SimpMessageHeaderAccessor;
 import org.springframework.web.bind.annotation.*;
 
 import javax.servlet.http.HttpServletRequest;
 import javax.validation.Valid;
-import java.security.Principal;
 import java.util.List;
 import java.util.Set;
 
 /**
  * 聊天控制器
- * 处理聊天相关的HTTP和WebSocket请求
+ * 处理聊天相关的HTTP请求
+ * 注意：WebSocket消息处理已移至 WebSocketMessageHandler
  */
 @RestController
 @RequestMapping("/api/chat")
-public class ChatController {
-
-    private static final Logger logger = LoggerFactory.getLogger(ChatController.class);
+public class ChatController extends BaseController {
 
     private final ChatService chatService;
-    private final JwtTokenUtil jwtTokenUtil;
     private final SimpMessagingTemplate messagingTemplate;
 
-    public ChatController(ChatService chatService, JwtTokenUtil jwtTokenUtil, SimpMessagingTemplate messagingTemplate) {
+    public ChatController(ChatService chatService, SimpMessagingTemplate messagingTemplate) {
         this.chatService = chatService;
-        this.jwtTokenUtil = jwtTokenUtil;
         this.messagingTemplate = messagingTemplate;
     }
 
@@ -48,10 +40,12 @@ public class ChatController {
      */
     @PostMapping("/sessions/default")
     public ApiResponse<ChatSession> getOrCreateDefaultSession(HttpServletRequest request) {
-        Long userId = jwtTokenUtil.getUserIdFromRequest(request);
-        if (userId == null) {
-            return ApiResponse.error(401, "未登录");
+        ApiResponse<?> authCheck = checkAuth(request);
+        if (authCheck != null) {
+            return (ApiResponse<ChatSession>) authCheck;
         }
+        
+        Long userId = getCurrentUserId(request);
         ChatSession session = chatService.getOrCreateDefaultSession(userId);
         return ApiResponse.success(session);
     }
@@ -61,10 +55,12 @@ public class ChatController {
      */
     @GetMapping("/sessions")
     public ApiResponse<List<ChatSession>> getSessions(HttpServletRequest request) {
-        Long userId = jwtTokenUtil.getUserIdFromRequest(request);
-        if (userId == null) {
-            return ApiResponse.error(401, "未登录");
+        ApiResponse<?> authCheck = checkAuth(request);
+        if (authCheck != null) {
+            return (ApiResponse<List<ChatSession>>) authCheck;
         }
+        
+        Long userId = getCurrentUserId(request);
         return ApiResponse.success(chatService.getSessionsByUserId(userId));
     }
 
@@ -74,13 +70,14 @@ public class ChatController {
     @GetMapping("/sessions/{sessionId}/messages")
     public ApiResponse<List<MessageResponse>> getMessages(
             @PathVariable Long sessionId,
-            @RequestParam(defaultValue = "1") Integer page,
-            @RequestParam(defaultValue = "50") Integer pageSize,
+            @RequestParam(required = false) Integer page,
+            @RequestParam(required = false) Integer pageSize,
             HttpServletRequest request) {
-        Long userId = jwtTokenUtil.getUserIdFromRequest(request);
-        if (userId == null) {
-            return ApiResponse.error(401, "未登录");
+        ApiResponse<?> authCheck = checkAuth(request);
+        if (authCheck != null) {
+            return (ApiResponse<List<MessageResponse>>) authCheck;
         }
+        
         return ApiResponse.success(chatService.getMessages(sessionId, page, pageSize));
     }
 
@@ -90,40 +87,19 @@ public class ChatController {
     @PostMapping("/messages")
     public ApiResponse<MessageResponse> sendMessage(@Valid @RequestBody MessageRequest request,
                                                      HttpServletRequest httpRequest) {
-        Long senderId = jwtTokenUtil.getUserIdFromRequest(httpRequest);
-        if (senderId == null) {
-            return ApiResponse.error(401, "未登录");
+        ApiResponse<?> authCheck = checkAuth(httpRequest);
+        if (authCheck != null) {
+            return (ApiResponse<MessageResponse>) authCheck;
         }
 
+        Long senderId = getCurrentUserId(httpRequest);
         MessageResponse response = chatService.sendMessage(senderId, request);
         
         // 广播消息到会话的所有成员
-        messagingTemplate.convertAndSend("/topic/session." + request.getSessionId(), response);
+        String destination = WebSocketConstants.TOPIC_SESSION_PREFIX + request.getSessionId();
+        messagingTemplate.convertAndSend(destination, response);
 
         return ApiResponse.success(response);
-    }
-
-    /**
-     * WebSocket消息处理：接收客户端发送的消息
-     */
-    @MessageMapping("/chat.send")
-    public void sendMessage(@Payload MessageRequest request, SimpMessageHeaderAccessor headerAccessor) {
-        Long senderId = getUserIdFromPrincipal(headerAccessor.getUser());
-        if (senderId == null) {
-            logger.error("WebSocket消息处理失败：未找到用户信息");
-            throw new RuntimeException("未找到用户信息");
-        }
-
-        logger.debug("收到WebSocket消息: senderId={}, sessionId={}, content={}", 
-                senderId, request.getSessionId(), request.getContent());
-
-        // 保存消息到数据库
-        MessageResponse response = chatService.sendMessage(senderId, request);
-
-        // 广播消息到会话的所有成员
-        String destination = "/topic/session." + request.getSessionId();
-        messagingTemplate.convertAndSend(destination, response);
-        logger.debug("消息已广播: destination={}, messageId={}", destination, response.getId());
     }
 
     /**
@@ -133,9 +109,9 @@ public class ChatController {
     public ApiResponse<List<SessionMemberResponse>> getSessionMembers(
             @PathVariable Long sessionId,
             HttpServletRequest request) {
-        Long userId = jwtTokenUtil.getUserIdFromRequest(request);
-        if (userId == null) {
-            return ApiResponse.error(401, "未登录");
+        ApiResponse<?> authCheck = checkAuth(request);
+        if (authCheck != null) {
+            return (ApiResponse<List<SessionMemberResponse>>) authCheck;
         }
         
         List<SessionMemberResponse> members = chatService.getSessionMembers(sessionId);
@@ -149,9 +125,9 @@ public class ChatController {
     public ApiResponse<SessionMemberStatsResponse> getSessionMemberStats(
             @PathVariable Long sessionId,
             HttpServletRequest request) {
-        Long userId = jwtTokenUtil.getUserIdFromRequest(request);
-        if (userId == null) {
-            return ApiResponse.error(401, "未登录");
+        ApiResponse<?> authCheck = checkAuth(request);
+        if (authCheck != null) {
+            return (ApiResponse<SessionMemberStatsResponse>) authCheck;
         }
         
         SessionMemberStatsResponse stats = chatService.getSessionMemberStats(sessionId);
@@ -165,35 +141,12 @@ public class ChatController {
     public ApiResponse<Set<Long>> getOnlineUserIds(
             @PathVariable Long sessionId,
             HttpServletRequest request) {
-        Long userId = jwtTokenUtil.getUserIdFromRequest(request);
-        if (userId == null) {
-            return ApiResponse.error(401, "未登录");
+        ApiResponse<?> authCheck = checkAuth(request);
+        if (authCheck != null) {
+            return (ApiResponse<Set<Long>>) authCheck;
         }
         
         Set<Long> onlineUserIds = chatService.getOnlineUserIds(sessionId);
         return ApiResponse.success(onlineUserIds);
-    }
-
-    /**
-     * 从Principal中获取用户ID
-     */
-    private Long getUserIdFromPrincipal(Principal principal) {
-        if (principal == null) {
-            return null;
-        }
-        
-        // 如果是StompPrincipal，直接获取用户ID
-        if (principal instanceof WebSocketAuthInterceptor.StompPrincipal) {
-            return ((WebSocketAuthInterceptor.StompPrincipal) principal).getUserId();
-        }
-        
-        // 否则尝试从名称解析
-        try {
-            String name = principal.getName();
-            return Long.parseLong(name);
-        } catch (NumberFormatException e) {
-            logger.warn("无法从Principal获取用户ID: {}", principal.getClass().getName());
-            return null;
-        }
     }
 }

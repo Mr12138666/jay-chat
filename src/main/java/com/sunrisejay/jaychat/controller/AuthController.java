@@ -1,7 +1,8 @@
 package com.sunrisejay.jaychat.controller;
 
 import com.sunrisejay.jaychat.common.ApiResponse;
-import com.sunrisejay.jaychat.common.util.JwtTokenUtil;
+import com.sunrisejay.jaychat.common.constant.ApiConstants;
+import com.sunrisejay.jaychat.controller.base.BaseController;
 import com.sunrisejay.jaychat.dto.request.LoginRequest;
 import com.sunrisejay.jaychat.dto.request.RegisterRequest;
 import com.sunrisejay.jaychat.dto.request.UpdateNicknameRequest;
@@ -11,7 +12,6 @@ import com.sunrisejay.jaychat.service.AuthService;
 import com.sunrisejay.jaychat.service.OssService;
 import io.jsonwebtoken.Claims;
 import org.springframework.web.bind.annotation.*;
-
 import org.springframework.web.multipart.MultipartFile;
 
 import javax.servlet.http.HttpServletRequest;
@@ -23,15 +23,13 @@ import javax.validation.Valid;
  */
 @RestController
 @RequestMapping("/api/auth")
-public class AuthController {
+public class AuthController extends BaseController {
 
     private final AuthService authService;
-    private final JwtTokenUtil jwtTokenUtil;
     private final OssService ossService;
 
-    public AuthController(AuthService authService, JwtTokenUtil jwtTokenUtil, OssService ossService) {
+    public AuthController(AuthService authService, OssService ossService) {
         this.authService = authService;
-        this.jwtTokenUtil = jwtTokenUtil;
         this.ossService = ossService;
     }
 
@@ -59,23 +57,22 @@ public class AuthController {
     public ApiResponse<Claims> me(HttpServletRequest request) {
         Claims claims = jwtTokenUtil.getClaimsFromRequest(request);
         if (claims == null) {
-            return ApiResponse.error(401, "未登录");
+            return ApiResponse.error(ApiConstants.ERROR_CODE_UNAUTHORIZED, ApiConstants.ERROR_MESSAGE_UNAUTHORIZED);
         }
         return ApiResponse.success(claims);
-
     }
-
 
     /**
      * 修改昵称
      */
     @PutMapping("/nickname")
     public ApiResponse<Void> updateNickname(@Valid @RequestBody UpdateNicknameRequest request, HttpServletRequest httpRequest) {
-        Long userId = jwtTokenUtil.getUserIdFromRequest(httpRequest);
-        if (userId == null) {
-            return ApiResponse.error(401, "未登录");
+        ApiResponse<?> authCheck = checkAuth(httpRequest);
+        if (authCheck != null) {
+            return (ApiResponse<Void>) authCheck;
         }
 
+        Long userId = getCurrentUserId(httpRequest);
         authService.updateNickname(userId, request.getNickname());
         return ApiResponse.success(null);
     }
@@ -87,9 +84,9 @@ public class AuthController {
     public ApiResponse<UserDetailResponse> getUserDetail(
             @PathVariable Long userId,
             HttpServletRequest request) {
-        Long currentUserId = jwtTokenUtil.getUserIdFromRequest(request);
-        if (currentUserId == null) {
-            return ApiResponse.error(401, "未登录");
+        ApiResponse<?> authCheck = checkAuth(request);
+        if (authCheck != null) {
+            return (ApiResponse<UserDetailResponse>) authCheck;
         }
 
         UserDetailResponse userDetail = authService.getUserDetail(userId);
@@ -103,11 +100,13 @@ public class AuthController {
     public ApiResponse<String> uploadAvatar(
             @RequestParam("file") MultipartFile file,
             HttpServletRequest httpRequest) {
-        Long userId = jwtTokenUtil.getUserIdFromRequest(httpRequest);
-        if (userId == null) {
-            return ApiResponse.error(401, "未登录");
+        ApiResponse<?> authCheck = checkAuth(httpRequest);
+        if (authCheck != null) {
+            return (ApiResponse<String>) authCheck;
         }
 
+        Long userId = getCurrentUserId(httpRequest);
+        
         // 上传文件到OSS
         String avatarUrl = ossService.uploadFile(file, userId);
         
@@ -116,6 +115,7 @@ public class AuthController {
         
         return ApiResponse.success(avatarUrl);
     }
+
 
 
 

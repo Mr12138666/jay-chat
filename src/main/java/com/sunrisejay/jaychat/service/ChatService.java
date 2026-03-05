@@ -1,5 +1,8 @@
 package com.sunrisejay.jaychat.service;
 
+import com.sunrisejay.jaychat.common.constant.ApiConstants;
+import com.sunrisejay.jaychat.common.constant.SessionConstants;
+import com.sunrisejay.jaychat.common.converter.MessageConverter;
 import com.sunrisejay.jaychat.common.exception.BusinessException;
 import com.sunrisejay.jaychat.dto.request.MessageRequest;
 import com.sunrisejay.jaychat.dto.response.MessageResponse;
@@ -35,17 +38,20 @@ public class ChatService {
     private final ChatSessionMemberMapper memberMapper;
     private final UserMapper userMapper;
     private final OnlineUserService onlineUserService;
+    private final MessageConverter messageConverter;
 
     public ChatService(ChatMessageMapper messageMapper,
                        ChatSessionMapper sessionMapper,
                        ChatSessionMemberMapper memberMapper,
                        UserMapper userMapper,
-                       OnlineUserService onlineUserService) {
+                       OnlineUserService onlineUserService,
+                       MessageConverter messageConverter) {
         this.messageMapper = messageMapper;
         this.sessionMapper = sessionMapper;
         this.memberMapper = memberMapper;
         this.userMapper = userMapper;
         this.onlineUserService = onlineUserService;
+        this.messageConverter = messageConverter;
     }
 
     /**
@@ -77,25 +83,9 @@ public class ChatService {
         // 更新用户的上次发言时间
         userMapper.updateLastMessageAt(senderId);
 
-        // 构建响应
-        MessageResponse response = new MessageResponse();
-        response.setId(message.getId());
-        response.setSessionId(message.getSessionId());
-        response.setSenderId(message.getSenderId());
-        response.setContent(message.getContent());
-        response.setContentType(message.getContentType());
-        response.setSentAt(message.getSentAt());
-
-        // 查询发送者信息
+        // 查询发送者信息并转换为响应
         User user = userMapper.selectById(senderId);
-        if (user != null) {
-            // 如果昵称为空，使用用户名作为备选
-            String nickname = user.getNickname();
-            if (nickname == null || nickname.trim().isEmpty()) {
-                nickname = user.getUsername();
-            }
-            response.setSenderNickname(nickname);
-        }
+        MessageResponse response = messageConverter.toResponse(message, user);
 
         logger.debug("消息发送成功: messageId={}, sessionId={}, senderId={}", 
                 message.getId(), request.getSessionId(), senderId);
@@ -106,31 +96,23 @@ public class ChatService {
      * 获取会话消息历史
      */
     public List<MessageResponse> getMessages(Long sessionId, Integer page, Integer pageSize) {
+        // 使用默认值
+        if (page == null || page < 1) {
+            page = ApiConstants.DEFAULT_PAGE;
+        }
+        if (pageSize == null || pageSize < 1) {
+            pageSize = ApiConstants.DEFAULT_PAGE_SIZE;
+        }
+
         int offset = (page - 1) * pageSize;
         List<ChatMessage> messages = messageMapper.selectBySessionId(sessionId, pageSize, offset);
 
-        return messages.stream().map(msg -> {
-            MessageResponse response = new MessageResponse();
-            response.setId(msg.getId());
-            response.setSessionId(msg.getSessionId());
-            response.setSenderId(msg.getSenderId());
-            response.setContent(msg.getContent());
-            response.setContentType(msg.getContentType());
-            response.setSentAt(msg.getSentAt());
-
-            // 查询发送者信息
-            User user = userMapper.selectById(msg.getSenderId());
-            if (user != null) {
-                // 如果昵称为空，使用用户名作为备选
-                String nickname = user.getNickname();
-                if (nickname == null || nickname.trim().isEmpty()) {
-                    nickname = user.getUsername();
-                }
-                response.setSenderNickname(nickname);
-            }
-
-            return response;
-        }).collect(Collectors.toList());
+        return messages.stream()
+                .map(msg -> {
+                    User user = userMapper.selectById(msg.getSenderId());
+                    return messageConverter.toResponse(msg, user);
+                })
+                .collect(Collectors.toList());
     }
 
     /**
@@ -168,8 +150,8 @@ public class ChatService {
             if (defaultSession == null) {
                 // 如果全局不存在，创建新的公共聊天室
                 defaultSession = new ChatSession();
-                defaultSession.setType("group");
-                defaultSession.setName("公共聊天室");
+                defaultSession.setType(SessionConstants.SESSION_TYPE_GROUP);
+                defaultSession.setName(SessionConstants.DEFAULT_SESSION_NAME);
                 defaultSession.setOwnerId(userId);
                 
                 int result = sessionMapper.insert(defaultSession);
@@ -206,7 +188,7 @@ public class ChatService {
      * 如果有多个，选择最早创建的那个
      */
     private ChatSession findGlobalDefaultSession() {
-        List<ChatSession> sessions = sessionMapper.selectAllByName("公共聊天室");
+        List<ChatSession> sessions = sessionMapper.selectAllByName(SessionConstants.DEFAULT_SESSION_NAME);
         if (sessions != null && !sessions.isEmpty()) {
             // 返回最早创建的那个
             return sessions.get(0);
