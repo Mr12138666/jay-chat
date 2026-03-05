@@ -1,0 +1,37 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE mapper
+        PUBLIC "-//mybatis.org//DTD Mapper 3.0//EN"
+        "http://mybatis.org/dtd/mybatis-3-mapper.dtd">
+<mapper namespace="com.sunrisejay.jaychat.mapper.ChatSessionMemberMapper">
+
+    <!-- 结果映射：会话成员信息 -->
+    <resultMap id="SessionMemberResponseMap" type="com.sunrisejay.jaychat.dto.response.SessionMemberResponse">
+        <result column="userId" property="userId"/>
+        <result column="username" property="username"/>
+        <result column="nickname" property="nickname"/>
+        <result column="avatar" property="avatar"/>
+        <result column="joinedAt" property="joinedAt"/>
+    </resultMap>
+
+    <!-- 查询会话成员列表（带用户信息） -->
+    <select id="selectMembersWithUserInfo" resultMap="SessionMemberResponseMap">
+        SELECT
+        u.id as userId,
+        u.username,
+        u.nickname,
+        u.avatar,
+        csm.joined_at as joinedAt
+        FROM chat_session_member csm
+        INNER JOIN user u ON csm.user_id = u.id
+        WHERE csm.session_id = #{sessionId}
+        ORDER BY csm.joined_at ASC
+    </select>
+
+    <!-- 统计会话成员总数 -->
+    <select id="countMembers" resultType="java.lang.Integer">
+        SELECT COUNT(*)
+        FROM chat_session_member
+        WHERE session_id = #{sessionId}
+    </select>
+
+</mapper>
