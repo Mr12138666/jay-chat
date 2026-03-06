@@ -14,8 +14,8 @@ import io.jsonwebtoken.Claims;
 import org.springframework.web.bind.annotation.*;
 import org.springframework.web.multipart.MultipartFile;
 
-import javax.servlet.http.HttpServletRequest;
-import javax.validation.Valid;
+import jakarta.servlet.http.HttpServletRequest;
+import jakarta.validation.Valid;
 
 /**
  * 认证控制器
@@ -82,7 +82,7 @@ public class AuthController extends BaseController {
      */
     @GetMapping("/users/{userId}")
     public ApiResponse<UserDetailResponse> getUserDetail(
-            @PathVariable Long userId,
+            @PathVariable("userId") Long userId,
             HttpServletRequest request) {
         ApiResponse<?> authCheck = checkAuth(request);
         if (authCheck != null) {

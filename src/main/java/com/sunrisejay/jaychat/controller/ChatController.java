@@ -15,8 +15,8 @@ import org.springframework.messaging.simp.SimpMessagingTemplate;
 import org.springframework.web.bind.annotation.*;
 import org.springframework.web.multipart.MultipartFile;
 
-import javax.servlet.http.HttpServletRequest;
-import javax.validation.Valid;
+import jakarta.servlet.http.HttpServletRequest;
+import jakarta.validation.Valid;
 import java.util.List;
 import java.util.Set;
 
@@ -73,9 +73,9 @@ public class ChatController extends BaseController {
      */
     @GetMapping("/sessions/{sessionId}/messages")
     public ApiResponse<List<MessageResponse>> getMessages(
-            @PathVariable Long sessionId,
-            @RequestParam(required = false) Integer page,
-            @RequestParam(required = false) Integer pageSize,
+            @PathVariable("sessionId") Long sessionId,
+            @RequestParam(value = "page", required = false) Integer page,
+            @RequestParam(value = "pageSize", required = false) Integer pageSize,
             HttpServletRequest request) {
         ApiResponse<?> authCheck = checkAuth(request);
         if (authCheck != null) {
@@ -111,7 +111,7 @@ public class ChatController extends BaseController {
      */
     @GetMapping("/sessions/{sessionId}/members")
     public ApiResponse<List<SessionMemberResponse>> getSessionMembers(
-            @PathVariable Long sessionId,
+            @PathVariable("sessionId") Long sessionId,
             HttpServletRequest request) {
         ApiResponse<?> authCheck = checkAuth(request);
         if (authCheck != null) {
@@ -127,7 +127,7 @@ public class ChatController extends BaseController {
      */
     @GetMapping("/sessions/{sessionId}/members/stats")
     public ApiResponse<SessionMemberStatsResponse> getSessionMemberStats(
-            @PathVariable Long sessionId,
+            @PathVariable("sessionId") Long sessionId,
             HttpServletRequest request) {
         ApiResponse<?> authCheck = checkAuth(request);
         if (authCheck != null) {
@@ -143,7 +143,7 @@ public class ChatController extends BaseController {
      */
     @GetMapping("/sessions/{sessionId}/members/online")
     public ApiResponse<Set<Long>> getOnlineUserIds(
-            @PathVariable Long sessionId,
+            @PathVariable("sessionId") Long sessionId,
             HttpServletRequest request) {
         ApiResponse<?> authCheck = checkAuth(request);
         if (authCheck != null) {

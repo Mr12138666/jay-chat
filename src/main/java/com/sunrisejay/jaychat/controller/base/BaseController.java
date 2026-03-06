@@ -5,7 +5,7 @@ import com.sunrisejay.jaychat.common.constant.ApiConstants;
 import com.sunrisejay.jaychat.common.util.JwtTokenUtil;
 import org.springframework.beans.factory.annotation.Autowired;
 
-import javax.servlet.http.HttpServletRequest;
+import jakarta.servlet.http.HttpServletRequest;
 
 /**
  * 基础控制器

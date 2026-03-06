@@ -1,40 +1,25 @@
 package com.sunrisejay.jaychat.config;
 
+import io.swagger.v3.oas.models.OpenAPI;
+import io.swagger.v3.oas.models.info.Info;
 import org.springframework.context.annotation.Bean;
 import org.springframework.context.annotation.Configuration;
-import springfox.documentation.builders.ApiInfoBuilder;
-import springfox.documentation.builders.PathSelectors;
-import springfox.documentation.builders.RequestHandlerSelectors;
-import springfox.documentation.service.ApiInfo;
-import springfox.documentation.spi.DocumentationType;
-import springfox.documentation.spring.web.plugins.Docket;
 
 /**
- * Swagger/Knife4j配置
- * 注意：@EnableSwagger2WebMvc已废弃，但Springfox 3.0.0仍需要它
- * 如需升级，可考虑迁移到springdoc-openapi
+ * SpringDoc OpenAPI 配置
+ * Spring Boot 3.x 使用 springdoc-openapi 替代 Springfox
+ * 访问地址: http://localhost:8080/swagger-ui/index.html
  */
 @Configuration
-@springfox.documentation.swagger2.annotations.EnableSwagger2WebMvc
 public class SwaggerConfig {
 
     @Bean
-    public Docket api() {
-        return new Docket(DocumentationType.SWAGGER_2)
-                .apiInfo(apiInfo())
-                .select()
-                // 扫描你的 controller 包
-                .apis(RequestHandlerSelectors.basePackage("com.sunrisejay.jaychat"))
-                .paths(PathSelectors.any())
-                .build();
-    }
-
-    private ApiInfo apiInfo() {
-        return new ApiInfoBuilder()
-                .title("jay-chat 接口文档")
-                .description("jay-chat 大型聊天室项目 API 文档（Knife4j）")
-                .version("1.0.0")
-                .build();
+    public OpenAPI customOpenAPI() {
+        return new OpenAPI()
+                .info(new Info()
+                        .title("jay-chat 接口文档")
+                        .description("jay-chat 大型聊天室项目 API 文档")
+                        .version("1.0.0"));
     }
 }
 
