@@ -47,6 +47,7 @@ const emit = defineEmits<{
         </div>
         <div
           class="message-content"
+          :class="{ 'image-content': msg.contentType === 'image' }"
           :style="msg.senderId !== currentUserId ? {
             backgroundColor: getMessageBackgroundColor(msg.senderId),
             color: '#ffffff'
@@ -92,6 +93,19 @@ const emit = defineEmits<{
   min-width: 0;
   width: fit-content;
   align-items: flex-start;
+}
+
+/* 移动端消息宽度优化 */
+@media (max-width: 768px) {
+  .message {
+    max-width: 85%;
+  }
+}
+
+@media (max-width: 480px) {
+  .message {
+    max-width: 90%;
+  }
 }
 
 .message.own-message {
@@ -180,6 +194,27 @@ const emit = defineEmits<{
   width: fit-content;
   min-width: 0;
   white-space: pre-wrap;
+  overflow: hidden; /* 防止内容溢出 */
+  box-sizing: border-box; /* 确保padding计算正确 */
+}
+
+/* 图片消息的特殊样式 - 图片居中显示，消息框有边框和padding */
+.message-content.image-content {
+  padding: 8px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  width: fit-content;
+  max-width: 100%;
+  border: 1px solid rgba(255, 255, 255, 0.15);
+  background: #1a1a1a !important;
+  box-shadow: 0 2px 8px rgba(0, 0, 0, 0.2);
+}
+
+/* 自己发送的图片消息边框颜色 */
+.message.own-message .message-content.image-content {
+  border: 1px solid rgba(255, 255, 255, 0.2);
+  background: rgba(102, 126, 234, 0.1) !important;
 }
 
 .message.own-message .message-content {
@@ -193,12 +228,40 @@ const emit = defineEmits<{
 }
 
 .message-image {
-  max-width: 300px;
+  max-width: calc(100% - 0px); /* 减去父容器的padding */
   max-height: 400px;
-  border-radius: 8px;
+  width: auto;
+  height: auto;
+  border-radius: 6px;
   cursor: pointer;
   display: block;
   object-fit: contain;
+  /* 确保图片不会超出消息框 */
+  box-sizing: border-box;
+  margin: 0;
+}
+
+/* PC端图片尺寸优化 */
+@media (min-width: 769px) {
+  .message-image {
+    max-width: min(400px, 100%);
+    max-height: 500px;
+  }
+}
+
+/* 移动端图片尺寸优化 */
+@media (max-width: 768px) {
+  .message-image {
+    max-width: 100%;
+    max-height: 300px;
+  }
+}
+
+@media (max-width: 480px) {
+  .message-image {
+    max-width: 100%;
+    max-height: 250px;
+  }
 }
 </style>
 

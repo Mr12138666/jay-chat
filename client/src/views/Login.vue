@@ -169,12 +169,43 @@ const handleRegister = async () => {
 
 <style scoped>
 .login-container {
+  position: fixed;
+  top: 0;
+  left: 0;
+  right: 0;
+  bottom: 0;
+  width: 100vw;
+  height: 100vh;
   min-height: 100vh;
   display: flex;
   align-items: center;
   justify-content: center;
   background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
   padding: 20px;
+  box-sizing: border-box;
+  margin: 0;
+  overflow: auto;
+}
+
+/* 移动端优化 */
+@media (max-width: 480px) {
+  .login-container {
+    padding: 16px;
+  }
+  
+  .login-box {
+    padding: 30px 24px;
+    border-radius: 8px;
+  }
+  
+  .login-header h1 {
+    font-size: 28px;
+  }
+  
+  .form-group input {
+    padding: 10px;
+    font-size: 16; /* 防止iOS自动缩放 */
+  }
 }
 
 .login-box {
@@ -182,8 +213,55 @@ const handleRegister = async () => {
   border-radius: 12px;
   padding: 40px;
   width: 100%;
-  max-width: 400px;
+  max-width: 450px;
   box-shadow: 0 10px 40px rgba(0, 0, 0, 0.1);
+  box-sizing: border-box;
+}
+
+/* PC端优化 - 从768px开始 */
+@media (min-width: 768px) {
+  .login-box {
+    max-width: 500px !important;
+    padding: 50px !important;
+  }
+  
+  .login-header h1 {
+    font-size: 36px !important;
+  }
+  
+  .form-group input {
+    padding: 14px !important;
+    font-size: 15px !important;
+  }
+  
+  .submit-btn {
+    padding: 14px !important;
+    font-size: 16px !important;
+  }
+}
+
+/* 中等PC端 */
+@media (min-width: 1024px) {
+  .login-box {
+    max-width: 550px !important;
+    padding: 55px !important;
+  }
+}
+
+/* 大屏PC端 */
+@media (min-width: 1200px) {
+  .login-box {
+    max-width: 600px !important;
+    padding: 60px !important;
+  }
+}
+
+/* 超大屏PC端 */
+@media (min-width: 1440px) {
+  .login-box {
+    max-width: 650px !important;
+    padding: 65px !important;
+  }
 }
 
 .login-header {

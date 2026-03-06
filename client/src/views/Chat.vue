@@ -1111,6 +1111,20 @@ onUnmounted(() => {
   font-size: 14px;
 }
 
+/* PC端优化 */
+@media (min-width: 769px) {
+  .chat-messages {
+    padding: 24px;
+    max-width: 1200px;
+    margin: 0 auto;
+    width: 100%;
+  }
+  
+  .message {
+    max-width: 65%;
+  }
+}
+
 /* 响应式设计 - 移动端 */
 @media (max-width: 768px) {
   .mobile-menu-btn {

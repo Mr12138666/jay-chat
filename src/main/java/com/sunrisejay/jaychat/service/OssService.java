@@ -58,10 +58,10 @@ public class OssService {
             throw new BusinessException("只支持图片格式：jpg, jpeg, png, gif, webp");
         }
 
-        // 验证文件大小（限制10MB，聊天图片可以比头像大）
+        // 验证文件大小（限制20MB，聊天图片可以比头像大）
         long fileSize = file.getSize();
-        if (fileSize > 10 * 1024 * 1024) {
-            throw new BusinessException("图片大小不能超过10MB");
+        if (fileSize > 20 * 1024 * 1024) {
+            throw new BusinessException("图片大小不能超过20MB");
         }
 
         OSS ossClient = null;
