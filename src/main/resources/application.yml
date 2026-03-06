@@ -1,0 +1,91 @@
+# ============================================
+# MyBatis 配置
+# ============================================
+mybatis:
+  mapper-locations: classpath:mappers/*.xml
+  type-aliases-package: com.sunrisejay.jaychat
+
+# ============================================
+# Web 服务器配置
+# ============================================
+server:
+  port: 8080
+
+# ============================================
+# Spring 配置
+# ============================================
+spring:
+  # 文件上传配置
+  servlet:
+    multipart:
+      # 单个文件最大大小（20MB）
+      max-file-size: 20MB
+      # 整个请求最大大小（25MB，需要大于单个文件大小）
+      max-request-size: 25MB
+      # 文件写入磁盘的阈值（超过此大小会写入临时文件）
+      file-size-threshold: 2MB
+  
+  # 数据源配置
+  datasource:
+    url: jdbc:mysql://120.53.242.78:3306/jay_chat?useSSL=false&serverTimezone=UTC&characterEncoding=utf8&allowPublicKeyRetrieval=true
+    username: root
+    password: 123123
+    driver-class-name: com.mysql.cj.jdbc.Driver
+  ai:
+    deepseek:
+      api-key: sk-d64a7142505b487a82d49d941129f9ea
+      base-url: https://api.deepseek.com # DeepSeek 的请求 URL, 可不填，默认值为 api.deepseek.com
+      chat:
+        options:
+          model: deepseek-chat # 使用哪个模型
+          temperature: 0.8 # 温度值,值越高（如 0.8 或更高）， 增加随机性，生成内容更多样化、富有创造性；
+# ============================================
+# JWT 配置
+# ============================================
+jaychat:
+  jwt:
+    secret: ChangeThisSecretToSomethingSecure
+    expire-seconds: 604800
+
+# ============================================
+# SpringDoc OpenAPI 配置
+# ============================================
+springdoc:
+  api-docs:
+    path: /api-docs
+  swagger-ui:
+    path: /swagger-ui.html
+    enabled: true
+
+# ============================================
+# 日志配置
+# ============================================
+logging:
+  level:
+    com.sunrisejay.jaychat: INFO
+    org.springframework.web: WARN
+    org.mybatis: DEBUG
+    org.springframework.ai.chat.client.advisor: debug
+  pattern:
+    console: "%d{yyyy-MM-dd HH:mm:ss} [%thread] %-5level %logger{36} - %msg%n"
+
+# ============================================
+# 阿里云 OSS 配置
+# ============================================
+aliyun:
+  oss:
+    # OSS Endpoint 配置
+    # 示例：https://oss-cn-hangzhou.aliyuncs.com
+    endpoint: https://oss-cn-beijing.aliyuncs.com
+    # AccessKey ID
+    access-key-id: REPLACED_KEY_ID
+    # AccessKey Secret
+    access-key-secret: REPLACED_KEY_SECRET
+    # Bucket 名称
+    bucket-name: sunrise-jay
+    # 访问域名（可以是CDN或OSS域名）
+    # 示例：https://your-bucket.oss-cn-hangzhou.aliyuncs.com
+    # 或：https://cdn.yourdomain.com
+    domain: https://sunrise-jay.oss-cn-beijing.aliyuncs.com
+    # 文件存储路径前缀，例如 avatar/
+    path-prefix: avatar/
