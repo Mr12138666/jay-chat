@@ -9,6 +9,7 @@ import org.springframework.web.bind.MethodArgumentNotValidException;
 import org.springframework.web.bind.annotation.ExceptionHandler;
 import org.springframework.web.bind.annotation.ResponseStatus;
 import org.springframework.web.bind.annotation.RestControllerAdvice;
+import org.springframework.web.servlet.resource.NoResourceFoundException;
 
 import com.sunrisejay.jaychat.common.exception.BusinessException;
 import jakarta.validation.ConstraintViolation;
@@ -91,6 +92,22 @@ public class GlobalExceptionHandler {
     public ApiResponse<Void> handleRuntimeException(RuntimeException e) {
         logger.error("运行时异常", e);
         return ApiResponse.error(500, "服务器内部错误: " + e.getMessage());
+    }
+
+    /**
+     * 处理静态资源未找到异常（如 favicon.ico）
+     * 浏览器会自动请求 favicon.ico，如果不存在则静默处理
+     */
+    @ExceptionHandler(NoResourceFoundException.class)
+    @ResponseStatus(HttpStatus.NOT_FOUND)
+    public void handleNoResourceFoundException(NoResourceFoundException e) {
+        // 如果是 favicon.ico 请求，静默处理，不记录日志
+        if (e.getResourcePath() != null && e.getResourcePath().equals("/favicon.ico")) {
+            // 静默处理，直接返回 404，不记录日志
+            return;
+        }
+        // 其他静态资源未找到，记录警告
+        logger.warn("静态资源未找到: {}", e.getResourcePath());
     }
 
     /**
