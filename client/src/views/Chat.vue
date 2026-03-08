@@ -9,9 +9,13 @@ import {
   getSessionMembers,
   getSessionMemberStats,
   getOnlineUserIds,
+  getUsers,
+  createPrivateSession,
+  getPrivateSessionOtherMember,
   type ChatSession,
   type SessionMember,
-  type SessionMemberStats
+  type SessionMemberStats,
+  type ContactUser
 } from '../api/chat'
 import { wsService } from '../utils/websocket'
 import { formatTime } from '../utils/date'
@@ -32,6 +36,12 @@ const wsConnected = ref(false)
 const messagesContainer = ref<HTMLElement | null>(null)
 const showSidebar = ref(false)
 
+// 联系人列表相关
+const showContacts = ref(false)
+const contacts = ref<ContactUser[]>([])
+const loadingContacts = ref(false)
+const contactSearchKeyword = ref('')
+
 const showUserDetail = ref(false)
 const viewingUserId = ref<number | null>(null)
 const userDetail = ref<UserDetail | null>(null)
@@ -49,6 +59,12 @@ const onlineUserIds = ref<Set<number>>(new Set())
 const loadingMembers = ref(false)
 
 const userAvatarCache = ref<Map<number, string | null>>(new Map())
+
+// 私人会话其他成员缓存 (sessionId -> contactUser)
+const privateSessionMembers = ref<Map<number, ContactUser>>(new Map())
+
+// 未读消息数量 (sessionId -> count)
+const unreadCounts = ref<Map<number, number>>(new Map())
 
 const scrollToBottom = (smooth = false) => {
   if (!messagesContainer.value) return
@@ -97,10 +113,26 @@ const {
   handleMessage
 } = useChatMessages({
   currentSessionId,
+  currentUser,
   getUserAvatar,
   scrollToBottom,
   showError,
-  handleApiError
+  handleApiError,
+  onMessageReceived: (message) => {
+    // 收到非当前会话的消息，增加未读计数
+    const sessionId = message.sessionId
+    const currentCount = unreadCounts.value.get(sessionId) || 0
+    unreadCounts.value.set(sessionId, currentCount + 1)
+
+    // 将会话置顶
+    const sessionIndex = sessions.value.findIndex(s => s.id === sessionId)
+    if (sessionIndex > 0) {
+      const sessionsToMove = sessions.value.splice(sessionIndex, 1)
+      if (sessionsToMove[0]) {
+        sessions.value.unshift(sessionsToMove[0])
+      }
+    }
+  }
 })
 
 const loadSessions = async () => {
@@ -115,26 +147,42 @@ const loadSessions = async () => {
     // 然后获取用户的所有会话列表
     sessions.value = await getSessions()
     console.log('获取到的会话列表:', sessions.value)
-    
+
+    // 为每个私人会话获取对方信息
+    for (const session of sessions.value) {
+      if (session.type === 'private') {
+        try {
+          const otherMember = await getPrivateSessionOtherMember(session.id)
+          if (otherMember) {
+            privateSessionMembers.value.set(session.id, otherMember)
+          }
+        } catch (e) {
+          console.error('获取私人会话成员失败:', session.id, e)
+        }
+      }
+      // 初始化未读数为0
+      unreadCounts.value.set(session.id, 0)
+    }
+
     // 确保"公共聊天室"在列表中（如果不在，添加到列表开头）
     const hasDefaultSession = sessions.value.some(s => s.id === defaultSession.id)
     if (!hasDefaultSession) {
       sessions.value.unshift(defaultSession)
     }
-    
+
+    // 订阅所有会话（这样可以收到所有会话的消息）
+    if (wsConnected.value || wsService.isConnected()) {
+      const allSessionIds = sessions.value.map(s => s.id)
+      wsService.subscribeToAllSessions(allSessionIds, handleMessage)
+      console.log('已订阅所有会话:', allSessionIds)
+    }
+
     // 优先选择"公共聊天室"作为当前会话
     if (!currentSessionId.value) {
       currentSessionId.value = defaultSession.id
       // 更新 WebSocket 服务的当前会话ID
       wsService.setCurrentSessionId(defaultSession.id)
       await loadMessages(defaultSession.id)
-      // 订阅公共聊天室的消息（如果 WebSocket 已连接）
-      if (wsConnected.value || wsService.isConnected()) {
-        wsService.subscribeToSession(defaultSession.id, handleMessage)
-        console.log('已选择公共聊天室，会话ID:', defaultSession.id, '已订阅')
-      } else {
-        console.log('已选择公共聊天室，会话ID:', defaultSession.id, '等待 WebSocket 连接后自动订阅')
-      }
     }
   } catch (error: any) {
     console.error('加载会话列表失败:', error)
@@ -157,12 +205,92 @@ const loadSessions = async () => {
       wsService.setCurrentSessionId(defaultSession.id)
       await loadMessages(defaultSession.id)
       if (wsConnected.value || wsService.isConnected()) {
-        wsService.subscribeToSession(defaultSession.id, handleMessage)
+        const allSessionIds = sessions.value.map(s => s.id)
+        wsService.subscribeToAllSessions(allSessionIds, handleMessage)
       }
     } catch (createError) {
       console.error('创建默认会话也失败:', createError)
       showError('无法加载会话，请检查网络连接或刷新页面')
     }
+  }
+}
+
+// 获取会话显示名称（私人会话显示对方昵称）
+const getSessionDisplayName = (session: ChatSession): string => {
+  if (session.name) {
+    return session.name
+  }
+  if (session.type === 'private') {
+    const otherMember = privateSessionMembers.value.get(session.id)
+    if (otherMember) {
+      return otherMember.nickname
+    }
+    return '单聊'
+  }
+  return '群聊'
+}
+
+// 获取会话未读数量
+const getUnreadCount = (sessionId: number): number => {
+  return unreadCounts.value.get(sessionId) || 0
+}
+
+// 清除会话未读数量
+const clearUnreadCount = (sessionId: number) => {
+  unreadCounts.value.set(sessionId, 0)
+}
+
+// 加载联系人列表
+const loadContacts = async () => {
+  loadingContacts.value = true
+  try {
+    contacts.value = await getUsers(contactSearchKeyword.value || undefined)
+  } catch (error: any) {
+    console.error('加载联系人列表失败:', error)
+    const errorMessage = handleApiError(error)
+    showError(errorMessage)
+  } finally {
+    loadingContacts.value = false
+  }
+}
+
+// 搜索联系人
+const searchContacts = async () => {
+  await loadContacts()
+}
+
+// 打开联系人面板
+const openContacts = async () => {
+  showContacts.value = true
+  showSidebar.value = false
+  await loadContacts()
+}
+
+// 关闭联系人面板
+const closeContacts = () => {
+  showContacts.value = false
+  contactSearchKeyword.value = ''
+}
+
+// 点击联系人发起私聊
+const startPrivateChat = async (user: ContactUser) => {
+  try {
+    // 创建私人会话
+    const session = await createPrivateSession(user.userId)
+    console.log('创建私人会话成功:', session)
+
+    // 刷新会话列表
+    await loadSessions()
+
+    // 切换到该会话
+    await switchSession(session.id)
+
+    // 关闭联系人面板
+    closeContacts()
+  } catch (error: any) {
+    console.error('创建私人会话失败:', error)
+    const errorMessage = handleApiError(error)
+    showError(errorMessage)
   }
 }
 
@@ -175,15 +303,19 @@ const switchSession = async (sessionId: number) => {
   currentSessionId.value = sessionId
   wsService.setCurrentSessionId(sessionId)
 
+  // 清除该会话的未读数量
+  clearUnreadCount(sessionId)
+
   // 移动端切换会话后关闭侧边栏
   if (window.innerWidth <= 768) {
     showSidebar.value = false
   }
 
   await loadMessages(sessionId)
-  // 订阅新会话的消息
+  // 订阅所有会话的消息（保持对所有会话的订阅，以便显示未读红点）
   if (wsConnected.value || wsService.isConnected()) {
-    wsService.subscribeToSession(sessionId, handleMessage)
+    const allSessionIds = sessions.value.map(s => s.id)
+    wsService.subscribeToAllSessions(allSessionIds, handleMessage)
   }
 
   // 加载新会话的成员统计
@@ -495,17 +627,19 @@ onMounted(async () => {
   
   // 等待一小段时间让连接建立，然后检查状态
   setTimeout(() => {
-    if (currentSessionId.value) {
+    if (sessions.value.length > 0) {
       if (wsConnected.value || wsService.isConnected()) {
-        console.log('WebSocket 已连接，立即订阅会话:', currentSessionId.value)
-        wsService.subscribeToSession(currentSessionId.value, handleMessage)
+        console.log('WebSocket 已连接，立即订阅所有会话')
+        const allSessionIds = sessions.value.map(s => s.id)
+        wsService.subscribeToAllSessions(allSessionIds, handleMessage)
       } else {
-        console.log('WebSocket 未连接，等待连接成功后自动订阅会话:', currentSessionId.value)
+        console.log('WebSocket 未连接，等待连接成功后自动订阅所有会话')
         // 如果 3 秒后还没连接，再次尝试订阅
         setTimeout(() => {
-          if (currentSessionId.value && (wsConnected.value || wsService.isConnected())) {
-            console.log('延迟订阅会话:', currentSessionId.value)
-            wsService.subscribeToSession(currentSessionId.value, handleMessage)
+          if (sessions.value.length > 0 && (wsConnected.value || wsService.isConnected())) {
+            console.log('延迟订阅所有会话')
+            const allSessionIds = sessions.value.map(s => s.id)
+            wsService.subscribeToAllSessions(allSessionIds, handleMessage)
           }
         }, 3000)
       }
@@ -574,19 +708,86 @@ onUnmounted(() => {
       </div>
 
       <section class="room-list">
-        <h2>会话列表</h2>
-        <ul v-if="sessions.length > 0">
-          <li 
-            v-for="session in sessions" 
-            :key="session.id" 
-            class="room-item"
-            :class="{ active: currentSessionId === session.id }"
-            @click="switchSession(session.id)"
+        <div class="tab-header">
+          <button
+            class="tab-btn"
+            :class="{ active: !showContacts }"
+            @click="showContacts = false"
           >
-            {{ session.name || (session.type === 'single' ? '单聊' : '群聊') }}
-          </li>
-        </ul>
-        <p v-else class="empty-sessions">暂无会话</p>
+            会话
+          </button>
+          <button
+            class="tab-btn"
+            :class="{ active: showContacts }"
+            @click="openContacts"
+          >
+            联系人
+          </button>
+        </div>
+
+        <!-- 会话列表 -->
+        <template v-if="!showContacts">
+          <ul v-if="sessions.length > 0">
+            <li
+              v-for="session in sessions"
+              :key="session.id"
+              class="room-item"
+              :class="{ active: currentSessionId === session.id }"
+              @click="switchSession(session.id)"
+            >
+              <span class="session-icon">
+                {{ session.type === 'private' ? '👤' : '👥' }}
+              </span>
+              {{ getSessionDisplayName(session) }}
+              <span v-if="getUnreadCount(session.id) > 0" class="unread-badge">
+                {{ getUnreadCount(session.id) > 99 ? '99+' : getUnreadCount(session.id) }}
+              </span>
+            </li>
+          </ul>
+          <p v-else class="empty-sessions">暂无会话</p>
+        </template>
+
+        <!-- 联系人列表 -->
+        <template v-else>
+          <div class="contact-search">
+            <input
+              v-model="contactSearchKeyword"
+              type="text"
+              placeholder="搜索联系人..."
+              class="search-input"
+              @keyup.enter="searchContacts"
+            />
+          </div>
+          <div v-if="loadingContacts" class="loading-contacts">加载中...</div>
+          <ul v-else-if="contacts.length > 0">
+            <li
+              v-for="contact in contacts"
+              :key="contact.userId"
+              class="contact-item"
+              @click="startPrivateChat(contact)"
+            >
+              <div class="contact-avatar">
+                <img
+                  v-if="contact.avatar"
+                  :src="contact.avatar"
+                  :alt="contact.nickname"
+                  class="avatar-img"
+                  @error="contact.avatar = null"
+                />
+                <div v-else class="avatar-placeholder">
+                  {{ contact.nickname?.[0] || 'U' }}
+                </div>
+              </div>
+              <div class="contact-info">
+                <div class="contact-name">{{ contact.nickname }}</div>
+                <div class="contact-username">@{{ contact.username }}</div>
+              </div>
+            </li>
+          </ul>
+          <p v-else class="empty-sessions">
+            {{ contactSearchKeyword ? '未找到匹配的联系人' : '暂无联系人' }}
+          </p>
+        </template>
       </section>
     </aside>
 
@@ -595,7 +796,7 @@ onUnmounted(() => {
         <div class="chat-header-content">
           <div class="chat-title-section">
             <h2>
-              {{ currentSessionId ? (sessions.find(s => s.id === currentSessionId)?.name || '聊天') : '请选择会话' }}
+              {{ currentSessionId ? getSessionDisplayName(sessions.find(s => s.id === currentSessionId)!) : '请选择会话' }}
               <span v-if="getCurrentSessionStats()" class="member-count">
                 ({{ getCurrentSessionStats()?.totalMembers || 0 }})
               </span>
@@ -1026,6 +1227,150 @@ onUnmounted(() => {
 .room-item.active {
   background: #333;
   border-left: 3px solid #667eea;
+}
+
+/* 标签页样式 */
+.tab-header {
+  display: flex;
+  padding: 0 20px 12px;
+  gap: 8px;
+}
+
+.tab-btn {
+  flex: 1;
+  padding: 8px 12px;
+  background: transparent;
+  border: 1px solid #333;
+  border-radius: 6px;
+  color: #999;
+  font-size: 13px;
+  cursor: pointer;
+  transition: all 0.2s;
+}
+
+.tab-btn:hover {
+  background: #2a2a2a;
+  color: #e0e0e0;
+}
+
+.tab-btn.active {
+  background: #667eea;
+  border-color: #667eea;
+  color: #fff;
+}
+
+/* 会话图标 */
+.session-icon {
+  margin-right: 8px;
+}
+
+/* 未读消息红点 */
+.unread-badge {
+  margin-left: auto;
+  padding: 2px 6px;
+  background: #ff4d4f;
+  color: #fff;
+  font-size: 11px;
+  font-weight: 500;
+  border-radius: 10px;
+  min-width: 18px;
+  text-align: center;
+}
+
+/* 联系人搜索 */
+.contact-search {
+  padding: 0 16px 12px;
+}
+
+.search-input {
+  width: 100%;
+  padding: 8px 12px;
+  background: #1a1a1a;
+  border: 1px solid #333;
+  border-radius: 6px;
+  color: #e0e0e0;
+  font-size: 13px;
+  outline: none;
+  box-sizing: border-box;
+}
+
+.search-input:focus {
+  border-color: #667eea;
+}
+
+.search-input::placeholder {
+  color: #666;
+}
+
+.loading-contacts {
+  text-align: center;
+  padding: 20px;
+  color: #666;
+  font-size: 14px;
+}
+
+/* 联系人列表 */
+.contact-item {
+  display: flex;
+  align-items: center;
+  padding: 12px 20px;
+  cursor: pointer;
+  transition: background 0.2s;
+}
+
+.contact-item:hover {
+  background: #2a2a2a;
+}
+
+.contact-avatar {
+  width: 40px;
+  height: 40px;
+  border-radius: 50%;
+  background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  font-weight: bold;
+  color: white;
+  flex-shrink: 0;
+  overflow: hidden;
+  margin-right: 12px;
+}
+
+.contact-avatar .avatar-img {
+  width: 100%;
+  height: 100%;
+  object-fit: cover;
+}
+
+.contact-avatar .avatar-placeholder {
+  width: 100%;
+  height: 100%;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+}
+
+.contact-info {
+  flex: 1;
+  min-width: 0;
+}
+
+.contact-name {
+  font-size: 14px;
+  font-weight: 500;
+  color: #fff;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+.contact-username {
+  font-size: 12px;
+  color: #999;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
 }
 
 .empty-sessions {

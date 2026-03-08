@@ -223,4 +223,96 @@ public class ChatService {
         return onlineUserService.getOnlineUsers(sessionId);
     }
 
+    /**
+     * 获取所有用户（除当前用户外）
+     */
+    public List<User> getAllUsersExcept(Long userId) {
+        return userMapper.selectAllExcept(userId);
+    }
+
+    /**
+     * 搜索用户
+     */
+    public List<User> searchUsers(String keyword, Long userId) {
+        if (keyword == null || keyword.trim().isEmpty()) {
+            return userMapper.selectAllExcept(userId);
+        }
+        return userMapper.searchByKeyword(keyword.trim(), userId);
+    }
+
+    /**
+     * 获取或创建私人会话
+     */
+    @Transactional
+    public ChatSession getOrCreatePrivateSession(Long userId, Long targetUserId) {
+        // 验证目标用户是否存在
+        User targetUser = userMapper.selectById(targetUserId);
+        if (targetUser == null) {
+            throw new BusinessException("目标用户不存在");
+        }
+
+        // 不能与自己聊天
+        if (userId.equals(targetUserId)) {
+            throw new BusinessException("不能与自己聊天");
+        }
+
+        // 查找已存在的私人会话
+        ChatSession existingSession = sessionMapper.selectSingleSessionBetweenUsers(userId, targetUserId);
+        if (existingSession != null) {
+            // 确保用户在会话中
+            if (!memberMapper.exists(existingSession.getId(), userId)) {
+                memberMapper.insert(existingSession.getId(), userId);
+            }
+            if (!memberMapper.exists(existingSession.getId(), targetUserId)) {
+                memberMapper.insert(existingSession.getId(), targetUserId);
+            }
+            logger.debug("使用已存在的私人会话: sessionId={}, userId={}, targetUserId={}",
+                    existingSession.getId(), userId, targetUserId);
+            return existingSession;
+        }
+
+        // 创建新的私人会话
+        ChatSession privateSession = new ChatSession();
+        privateSession.setType(SessionConstants.SESSION_TYPE_PRIVATE);
+        privateSession.setName(null); // 私人会话不需要名称，会显示对方昵称
+        privateSession.setOwnerId(userId);
+
+        int result = sessionMapper.insert(privateSession);
+        if (result <= 0 || privateSession.getId() == null) {
+            logger.error("创建私人会话失败: userId={}, targetUserId={}", userId, targetUserId);
+            throw new BusinessException("创建私人会话失败");
+        }
+
+        // 添加双方到会话
+        memberMapper.insert(privateSession.getId(), userId);
+        memberMapper.insert(privateSession.getId(), targetUserId);
+
+        logger.info("创建私人会话成功: sessionId={}, userId={}, targetUserId={}",
+                privateSession.getId(), userId, targetUserId);
+        return privateSession;
+    }
+
+    /**
+     * 获取私人会话的其他成员（除当前用户外）
+     */
+    public User getPrivateSessionOtherMember(Long sessionId, Long currentUserId) {
+        ChatSession session = sessionMapper.selectById(sessionId);
+        if (session == null) {
+            return null;
+        }
+
+        // 只有 single 类型才有"其他成员"的概念
+        if (!SessionConstants.SESSION_TYPE_PRIVATE.equals(session.getType())) {
+            return null;
+        }
+
+        List<Long> memberIds = memberMapper.selectUserIdsBySessionId(sessionId);
+        for (Long memberId : memberIds) {
+            if (!memberId.equals(currentUserId)) {
+                return userMapper.selectById(memberId);
+            }
+        }
+        return null;
+    }
+
 }

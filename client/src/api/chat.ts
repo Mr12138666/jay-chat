@@ -3,7 +3,7 @@ import request from './request'
 // 会话信息
 export interface ChatSession {
   id: number
-  type: string // single / group
+  type: string // private / group
   name: string | null
   ownerId: number | null
   createdAt: string
@@ -76,4 +76,34 @@ export const uploadChatImage = (file: File): Promise<string> => {
       'Content-Type': 'multipart/form-data'
     }
   })
+}
+
+// 用户信息（联系人列表用）
+export interface ContactUser {
+  userId: number
+  username: string
+  nickname: string
+  avatar: string | null
+  createdAt: string
+  lastLoginAt: string | null
+  lastMessageAt: string | null
+}
+
+// 获取用户列表（除当前用户外）
+export const getUsers = (keyword?: string): Promise<ContactUser[]> => {
+  return request.get('/api/chat/users', {
+    params: { keyword }
+  })
+}
+
+// 创建私人会话
+export const createPrivateSession = (targetUserId: number): Promise<ChatSession> => {
+  return request.post('/api/chat/sessions/private', null, {
+    params: { targetUserId }
+  })
+}
+
+// 获取私人会话的其他成员信息
+export const getPrivateSessionOtherMember = (sessionId: number): Promise<ContactUser | null> => {
+  return request.get(`/api/chat/sessions/${sessionId}/other-member`)
 }

@@ -1,5 +1,5 @@
 import SockJS from 'sockjs-client'
-import { Client } from '@stomp/stompjs'
+import { Client, type Frame, type StompSubscription } from '@stomp/stompjs'
 import type { IMessage } from '@stomp/stompjs'
 
 export interface ChatMessage {
@@ -12,6 +12,16 @@ export interface ChatMessage {
   sentAt?: string
 }
 
+// 开发环境标识
+const isDev = import.meta.env.DEV
+
+// 调试日志函数，仅在开发环境输出
+const debugLog = (...args: unknown[]) => {
+  if (isDev) {
+    console.log(...args)
+  }
+}
+
 class WebSocketService {
   private client: Client | null = null
   private connected = false
@@ -20,9 +30,10 @@ class WebSocketService {
 
   private currentSessionId: number | null = null
   private messageCallback: ((message: ChatMessage) => void) | null = null
-  private currentSubscription: any = null // 当前订阅对象
+  private currentSubscription: StompSubscription | null = null // 当前订阅对象
+  private subscriptions: Map<number, StompSubscription> = new Map() // 所有会话的订阅
   private currentToken: string | null = null // 当前 token
-  private currentErrorCallback: ((error: any) => void) | null = null // 当前错误回调
+  private currentErrorCallback: ((error: Frame) => void) | null = null // 当前错误回调
   
   // 连接状态变更回调（用于通知 Vue 组件更新 UI）
   private connectionStateCallback: ((connected: boolean) => void) | null = null
@@ -47,10 +58,10 @@ class WebSocketService {
   /**
    * 连接 WebSocket
    */
-  connect(token: string, onMessage: (message: ChatMessage) => void, onError?: (error: any) => void) {
+  connect(token: string, onMessage: (message: ChatMessage) => void, onError?: (error: Frame) => void) {
     // 如果已连接且使用相同的回调，不需要重新连接
     if (this.connected && this.client?.active && this.messageCallback === onMessage) {
-      console.log('WebSocket 已连接，使用现有连接')
+      debugLog('WebSocket 已连接，使用现有连接')
       // 更新回调函数
       this.messageCallback = onMessage
       // 如果有当前会话，确保已订阅
@@ -62,7 +73,7 @@ class WebSocketService {
 
     // 如果已连接但需要重新连接（token 可能变化），先断开
     if (this.connected && this.client?.active) {
-      console.log('WebSocket 已连接，先断开再重新连接以使用新的 token')
+      debugLog('WebSocket 已连接，先断开再重新连接以使用新的 token')
       this.disconnect()
       // 等待断开完成
       setTimeout(() => {
@@ -77,7 +88,7 @@ class WebSocketService {
   /**
    * 执行实际的连接操作
    */
-  private doConnect(token: string, onMessage: (message: ChatMessage) => void, onError?: (error: any) => void) {
+  private doConnect(token: string, onMessage: (message: ChatMessage) => void, onError?: (error: Frame) => void) {
     console.log('开始执行 WebSocket 连接...')
     this.messageCallback = onMessage
     this.currentToken = token
@@ -93,7 +104,7 @@ class WebSocketService {
     const socket = new SockJS(wsUrl)
     
     this.client = new Client({
-      webSocketFactory: () => socket as any,
+      webSocketFactory: () => socket as WebSocket,
       reconnectDelay: 5000,
       heartbeatIncoming: 4000,
       heartbeatOutgoing: 4000,
@@ -101,13 +112,13 @@ class WebSocketService {
         'Authorization': `Bearer ${token}`
       },
       onConnect: (frame) => {
-        console.log('WebSocket 连接成功', frame)
+        debugLog('WebSocket 连接成功', frame)
         this.connected = true
         this.reconnectAttempts = 0
         
         // 确保客户端状态正确
         if (this.client) {
-          console.log('客户端状态:', {
+          debugLog('客户端状态:', {
             active: this.client.active,
             connected: this.connected
           })
@@ -118,7 +129,7 @@ class WebSocketService {
         
         // 连接成功后，如果有当前会话，订阅该会话的消息
         if (this.currentSessionId && this.messageCallback) {
-          console.log('WebSocket 连接成功，自动订阅会话:', this.currentSessionId)
+          debugLog('WebSocket 连接成功，自动订阅会话:', this.currentSessionId)
           // 使用 setTimeout 确保连接完全建立后再订阅
           setTimeout(() => {
             if (this.currentSessionId && this.messageCallback) {
@@ -126,7 +137,7 @@ class WebSocketService {
             }
           }, 100)
         } else {
-          console.log('WebSocket 连接成功，但当前没有会话需要订阅', {
+          debugLog('WebSocket 连接成功，但当前没有会话需要订阅', {
             currentSessionId: this.currentSessionId,
             hasCallback: !!this.messageCallback
           })
@@ -149,7 +160,7 @@ class WebSocketService {
         }
       },
       onWebSocketClose: () => {
-        console.log('WebSocket 连接关闭')
+        debugLog('WebSocket 连接关闭')
         this.connected = false
         this.notifyConnectionState()
         // 只有在非主动断开的情况下才重连
@@ -158,7 +169,7 @@ class WebSocketService {
         }
       },
       onDisconnect: () => {
-        console.log('WebSocket 断开连接')
+        debugLog('WebSocket 断开连接')
         this.connected = false
         this.notifyConnectionState()
       }
@@ -180,13 +191,13 @@ class WebSocketService {
    */
   private attemptReconnect() {
     if (!this.currentToken || !this.messageCallback) {
-      console.log('无法重连：缺少 token 或回调函数')
+      debugLog('无法重连：缺少 token 或回调函数')
       return
     }
     
     if (this.reconnectAttempts < this.maxReconnectAttempts) {
       this.reconnectAttempts++
-      console.log(`尝试重连 (${this.reconnectAttempts}/${this.maxReconnectAttempts})...`)
+      debugLog(`尝试重连 (${this.reconnectAttempts}/${this.maxReconnectAttempts})...`)
       setTimeout(() => {
         if (this.currentToken && this.messageCallback) {
           this.doConnect(this.currentToken, this.messageCallback, this.currentErrorCallback || undefined)
@@ -223,7 +234,7 @@ class WebSocketService {
         destination: '/app/chat.send',
         body: JSON.stringify(message)
       })
-      console.log('消息已发送')
+      debugLog('消息已发送')
       return true
     } catch (error) {
       console.error('发送消息失败:', error)
@@ -247,13 +258,13 @@ class WebSocketService {
 
     // 如果已经订阅了同一个会话，不需要重新订阅
     if (this.currentSessionId === sessionId && this.currentSubscription) {
-      console.log('已订阅该会话，跳过')
+      debugLog('已订阅该会话，跳过')
       return
     }
 
     // 取消之前的订阅
     if (this.currentSubscription) {
-      console.log('取消之前的订阅')
+      debugLog('取消之前的订阅')
       this.currentSubscription.unsubscribe()
       this.currentSubscription = null
     }
@@ -266,7 +277,7 @@ class WebSocketService {
     this.currentSubscription = this.client.subscribe(destination, (message: IMessage) => {
       try {
         const data: ChatMessage = JSON.parse(message.body)
-        console.log(`收到 WebSocket 消息 [目标: ${destination}, 会话ID: ${sessionId}]:`, {
+        debugLog(`收到 WebSocket 消息 [目标: ${destination}, 会话ID: ${sessionId}]:`, {
           raw: message.body,
           parsed: data,
           messageSessionId: data.sessionId,
@@ -281,15 +292,52 @@ class WebSocketService {
   }
 
   /**
+   * 订阅多个会话
+   */
+  subscribeToAllSessions(sessionIds: number[], onMessage: (message: ChatMessage) => void) {
+    if (!this.client || !this.client.active) {
+      console.error('WebSocket 未连接，无法订阅会话')
+      return
+    }
+
+    // 取消所有之前的订阅
+    this.subscriptions.forEach((sub) => sub.unsubscribe())
+    this.subscriptions.clear()
+
+    this.messageCallback = onMessage
+
+    // 订阅所有会话
+    for (const sessionId of sessionIds) {
+      const destination = `/topic/session.${sessionId}`
+      debugLog(`订阅会话: ${destination}`)
+      const subscription = this.client.subscribe(destination, (message: IMessage) => {
+        try {
+          const data: ChatMessage = JSON.parse(message.body)
+          debugLog(`收到消息 [会话${sessionId}]:`, data)
+          onMessage(data)
+        } catch (error) {
+          console.error('解析消息失败:', error)
+        }
+      })
+      this.subscriptions.set(sessionId, subscription)
+    }
+
+    console.log(`已订阅 ${sessionIds.length} 个会话`)
+  }
+
+  /**
    * 断开连接
    */
   disconnect() {
-    // 取消订阅
+    // 取消所有订阅
+    this.subscriptions.forEach((sub) => sub.unsubscribe())
+    this.subscriptions.clear()
+
     if (this.currentSubscription) {
       this.currentSubscription.unsubscribe()
       this.currentSubscription = null
     }
-    
+
     if (this.client) {
       this.client.deactivate()
       this.client = null

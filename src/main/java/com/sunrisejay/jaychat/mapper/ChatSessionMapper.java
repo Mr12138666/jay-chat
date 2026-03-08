@@ -42,4 +42,17 @@ public interface ChatSessionMapper {
             "WHERE type = 'group' AND name = #{name} " +
             "ORDER BY created_at ASC")
     List<ChatSession> selectAllByName(@Param("name") String name);
+
+    /**
+     * 查询两个用户之间的私人会话
+     */
+    @Select("SELECT cs.id, cs.type, cs.name, cs.owner_id as ownerId, cs.created_at as createdAt " +
+            "FROM chat_session cs " +
+            "INNER JOIN chat_session_member csm1 ON cs.id = csm1.session_id " +
+            "INNER JOIN chat_session_member csm2 ON cs.id = csm2.session_id " +
+            "WHERE cs.type = 'single' " +
+            "AND csm1.user_id = #{userId1} " +
+            "AND csm2.user_id = #{userId2} " +
+            "LIMIT 1")
+    ChatSession selectSingleSessionBetweenUsers(@Param("userId1") Long userId1, @Param("userId2") Long userId2);
 }

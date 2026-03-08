@@ -7,18 +7,22 @@ import type { UiChatMessage } from '../types/chat-ui'
 
 interface UseChatMessagesOptions {
   currentSessionId: Ref<number | null>
+  currentUser: Ref<{ id: number; nickname: string; avatar: string | null } | null>
   getUserAvatar: (userId: number) => Promise<string | null>
   scrollToBottom: (smooth?: boolean) => void
   showError: (message: string) => void
   handleApiError: (error: unknown) => string
+  onMessageReceived?: (message: ChatMessage) => void
 }
 
 export const useChatMessages = ({
   currentSessionId,
+  currentUser,
   getUserAvatar,
   scrollToBottom,
   showError,
-  handleApiError
+  handleApiError,
+  onMessageReceived
 }: UseChatMessagesOptions) => {
   const messages = ref<UiChatMessage[]>([])
   const inputMessage = ref('')
@@ -64,10 +68,40 @@ export const useChatMessages = ({
     }
   }
 
-  const sendMessage = () => {
+  const sendMessage = async () => {
     if (!inputMessage.value.trim() || !currentSessionId.value) return
 
-    const success = wsService.sendMessage(currentSessionId.value, inputMessage.value.trim(), 'text')
+    const content = inputMessage.value.trim()
+    const tempId = Date.now()
+    const userId = currentUser.value?.id || 0
+
+    // 获取当前用户头像
+    let avatar: string | null = null
+    if (userId) {
+      try {
+        avatar = await getUserAvatar(userId)
+      } catch {
+        avatar = null
+      }
+    }
+
+    // 立即显示消息到消息列表（使用临时ID）
+    messages.value.push({
+      id: tempId,
+      sender: currentUser.value?.nickname || '我',
+      content: convertEmojiCodesInText(content),
+      time: formatTime(new Date().toISOString()),
+      senderId: userId,
+      senderAvatar: avatar,
+      contentType: 'text'
+    })
+
+    // 滚动到底部
+    nextTick(() => {
+      scrollToBottom(true)
+    })
+
+    const success = wsService.sendMessage(currentSessionId.value, content, 'text')
 
     if (success) {
       inputMessage.value = ''
@@ -144,10 +178,37 @@ export const useChatMessages = ({
   }
 
   const handleMessage = async (message: ChatMessage) => {
-    if (message.sessionId !== currentSessionId.value) return
-
-    if (message.id && messages.value.some(msg => msg.id === message.id)) {
+    // 如果不是当前会话的消息，调用未读回调
+    if (message.sessionId !== currentSessionId.value) {
+      if (onMessageReceived) {
+        onMessageReceived(message)
+      }
       return
+    }
+
+    // 如果消息有 ID，检查是否已存在（处理服务器返回的消息）
+    if (message.id) {
+      // 查找是否有临时消息需要替换（通过 senderId 和 content 匹配）
+      const tempIndex = messages.value.findIndex(msg =>
+        msg.id && typeof msg.id === 'number' && msg.id > Date.now() - 10000 &&
+        msg.senderId === message.senderId && msg.content === (message.contentType === 'image' ? message.content : convertEmojiCodesInText(message.content))
+      )
+
+      if (tempIndex !== -1) {
+        // 保留原来的头像，只更新 ID 和时间
+        const tempMsg = messages.value[tempIndex]!
+        messages.value[tempIndex] = {
+          ...tempMsg,
+          id: message.id,
+          time: formatTime(message.sentAt)
+        }
+        return
+      }
+
+      // 如果已有相同 ID 的消息，不重复添加
+      if (messages.value.some(msg => msg.id === message.id)) {
+        return
+      }
     }
 
     const senderName = message.senderNickname || (message.senderId ? `用户${message.senderId}` : '未知用户')

@@ -55,7 +55,7 @@ public class AuthController extends BaseController {
      */
     @GetMapping("/me")
     public ApiResponse<Claims> me(HttpServletRequest request) {
-        Claims claims = jwtTokenUtil.getClaimsFromRequest(request);
+        Claims claims = jwtUtil.getClaimsFromRequest(request);
         if (claims == null) {
             return ApiResponse.error(ApiConstants.ERROR_CODE_UNAUTHORIZED, ApiConstants.ERROR_MESSAGE_UNAUTHORIZED);
         }

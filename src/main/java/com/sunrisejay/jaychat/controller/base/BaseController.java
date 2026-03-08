@@ -2,7 +2,7 @@ package com.sunrisejay.jaychat.controller.base;
 
 import com.sunrisejay.jaychat.common.ApiResponse;
 import com.sunrisejay.jaychat.common.constant.ApiConstants;
-import com.sunrisejay.jaychat.common.util.JwtTokenUtil;
+import com.sunrisejay.jaychat.common.util.JwtUtil;
 import org.springframework.beans.factory.annotation.Autowired;
 
 import jakarta.servlet.http.HttpServletRequest;
@@ -14,14 +14,14 @@ import jakarta.servlet.http.HttpServletRequest;
 public abstract class BaseController {
 
     @Autowired
-    protected JwtTokenUtil jwtTokenUtil;
+    protected JwtUtil jwtUtil;
 
     /**
      * 从请求中获取当前用户ID
      * 如果未登录，返回null
      */
     protected Long getCurrentUserId(HttpServletRequest request) {
-        return jwtTokenUtil.getUserIdFromRequest(request);
+        return jwtUtil.getUserIdFromRequest(request);
     }
 
     /**

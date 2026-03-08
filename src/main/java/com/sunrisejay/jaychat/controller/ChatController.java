@@ -3,12 +3,15 @@ package com.sunrisejay.jaychat.controller;
 import com.sunrisejay.jaychat.common.ApiResponse;
 import com.sunrisejay.jaychat.common.constant.ApiConstants;
 import com.sunrisejay.jaychat.common.constant.WebSocketConstants;
+import com.sunrisejay.jaychat.common.converter.UserConverter;
 import com.sunrisejay.jaychat.controller.base.BaseController;
 import com.sunrisejay.jaychat.dto.request.MessageRequest;
 import com.sunrisejay.jaychat.dto.response.MessageResponse;
 import com.sunrisejay.jaychat.dto.response.SessionMemberResponse;
 import com.sunrisejay.jaychat.dto.response.SessionMemberStatsResponse;
+import com.sunrisejay.jaychat.dto.response.UserDetailResponse;
 import com.sunrisejay.jaychat.entity.ChatSession;
+import com.sunrisejay.jaychat.entity.User;
 import com.sunrisejay.jaychat.service.ChatService;
 import com.sunrisejay.jaychat.service.OssService;
 import org.springframework.messaging.simp.SimpMessagingTemplate;
@@ -19,6 +22,7 @@ import jakarta.servlet.http.HttpServletRequest;
 import jakarta.validation.Valid;
 import java.util.List;
 import java.util.Set;
+import java.util.stream.Collectors;
 
 /**
  * 聊天控制器
@@ -32,11 +36,13 @@ public class ChatController extends BaseController {
     private final ChatService chatService;
     private final SimpMessagingTemplate messagingTemplate;
     private final OssService ossService;
+    private final UserConverter userConverter;
 
-    public ChatController(ChatService chatService, SimpMessagingTemplate messagingTemplate, OssService ossService) {
+    public ChatController(ChatService chatService, SimpMessagingTemplate messagingTemplate, OssService ossService, UserConverter userConverter) {
         this.chatService = chatService;
         this.messagingTemplate = messagingTemplate;
         this.ossService = ossService;
+        this.userConverter = userConverter;
     }
 
     /**
@@ -169,5 +175,74 @@ public class ChatController extends BaseController {
         Long userId = getCurrentUserId(request);
         String imageUrl = ossService.uploadChatImage(file, userId);
         return ApiResponse.success(imageUrl);
+    }
+
+    /**
+     * 获取用户列表（除当前用户外）
+     */
+    @GetMapping("/users")
+    public ApiResponse<List<UserDetailResponse>> getUsers(
+            @RequestParam(value = "keyword", required = false) String keyword,
+            HttpServletRequest request) {
+        ApiResponse<?> authCheck = checkAuth(request);
+        if (authCheck != null) {
+            return (ApiResponse<List<UserDetailResponse>>) authCheck;
+        }
+
+        Long userId = getCurrentUserId(request);
+        List<User> users;
+
+        if (keyword != null && !keyword.trim().isEmpty()) {
+            users = chatService.searchUsers(keyword, userId);
+        } else {
+            users = chatService.getAllUsersExcept(userId);
+        }
+
+        // 使用 UserConverter 转换为 UserDetailResponse
+        List<UserDetailResponse> userResponses = users.stream()
+                .map(userConverter::toDetailResponse)
+                .collect(Collectors.toList());
+
+        return ApiResponse.success(userResponses);
+    }
+
+    /**
+     * 创建或获取私人会话
+     */
+    @PostMapping("/sessions/private")
+    public ApiResponse<ChatSession> createPrivateSession(
+            @RequestParam("targetUserId") Long targetUserId,
+            HttpServletRequest request) {
+        ApiResponse<?> authCheck = checkAuth(request);
+        if (authCheck != null) {
+            return (ApiResponse<ChatSession>) authCheck;
+        }
+
+        Long userId = getCurrentUserId(request);
+        ChatSession session = chatService.getOrCreatePrivateSession(userId, targetUserId);
+        return ApiResponse.success(session);
+    }
+
+    /**
+     * 获取私人会话的其他成员信息
+     */
+    @GetMapping("/sessions/{sessionId}/other-member")
+    public ApiResponse<UserDetailResponse> getPrivateSessionOtherMember(
+            @PathVariable("sessionId") Long sessionId,
+            HttpServletRequest request) {
+        ApiResponse<?> authCheck = checkAuth(request);
+        if (authCheck != null) {
+            return (ApiResponse<UserDetailResponse>) authCheck;
+        }
+
+        Long userId = getCurrentUserId(request);
+        User otherUser = chatService.getPrivateSessionOtherMember(sessionId, userId);
+
+        if (otherUser == null) {
+            return ApiResponse.success(null);
+        }
+
+        // 使用 UserConverter 转换为 UserDetailResponse
+        return ApiResponse.success(userConverter.toDetailResponse(otherUser));
     }
 }
