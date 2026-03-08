@@ -17,6 +17,9 @@ export interface MessageResponse {
   senderNickname?: string
   content: string
   contentType: string
+  replyToId?: number
+  replyToNickname?: string
+  replyToContent?: string
   sentAt: string
 }
 

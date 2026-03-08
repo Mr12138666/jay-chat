@@ -28,10 +28,23 @@ export const useChatMessages = ({
   const inputMessage = ref('')
   const loading = ref(false)
 
+  // 引用的消息
+  const replyingTo = ref<{ id: number; sender: string; content: string } | null>(null)
+
   const showEmojiPicker = ref(false)
   const uploadingImage = ref(false)
   const showImagePreview = ref(false)
   const previewImageUrl = ref<string | null>(null)
+
+  // 设置引用消息
+  const setReplyingTo = (message: { id: number; sender: string; content: string } | null) => {
+    replyingTo.value = message
+  }
+
+  // 取消引用
+  const cancelReply = () => {
+    replyingTo.value = null
+  }
 
   const loadMessages = async (sessionId: number) => {
     try {
@@ -48,7 +61,10 @@ export const useChatMessages = ({
         time: formatTime(msg.sentAt),
         senderId: msg.senderId,
         senderAvatar: msg.senderId ? undefined : null,
-        contentType: msg.contentType || 'text'
+        contentType: msg.contentType || 'text',
+        replyToId: msg.replyToId,
+        replyToNickname: msg.replyToNickname,
+        replyToContent: msg.replyToContent
       })).reverse()
 
       await nextTick()
@@ -75,6 +91,13 @@ export const useChatMessages = ({
     const tempId = Date.now()
     const userId = currentUser.value?.id || 0
 
+    // 保存引用消息信息
+    const replyInfo = replyingTo.value ? {
+      replyToId: replyingTo.value.id,
+      replyToNickname: replyingTo.value.sender,
+      replyToContent: replyingTo.value.content
+    } : {}
+
     // 获取当前用户头像
     let avatar: string | null = null
     if (userId) {
@@ -93,7 +116,8 @@ export const useChatMessages = ({
       time: formatTime(new Date().toISOString()),
       senderId: userId,
       senderAvatar: avatar,
-      contentType: 'text'
+      contentType: 'text',
+      ...replyInfo
     })
 
     // 滚动到底部
@@ -101,11 +125,13 @@ export const useChatMessages = ({
       scrollToBottom(true)
     })
 
-    const success = wsService.sendMessage(currentSessionId.value, content, 'text')
+    const success = wsService.sendMessage(currentSessionId.value, content, 'text', replyingTo.value?.id)
 
     if (success) {
       inputMessage.value = ''
       showEmojiPicker.value = false
+      // 清除引用
+      cancelReply()
     } else {
       console.error('发送消息失败，WebSocket 未连接')
     }
@@ -233,7 +259,10 @@ export const useChatMessages = ({
       time: formatTime(message.sentAt),
       senderId: message.senderId,
       senderAvatar,
-      contentType: message.contentType || 'text'
+      contentType: message.contentType || 'text',
+      replyToId: message.replyToId,
+      replyToNickname: message.replyToNickname,
+      replyToContent: message.replyToContent
     })
 
     nextTick(() => scrollToBottom(true))
@@ -243,6 +272,9 @@ export const useChatMessages = ({
     messages,
     inputMessage,
     loading,
+    replyingTo,
+    setReplyingTo,
+    cancelReply,
     showEmojiPicker,
     uploadingImage,
     showImagePreview,

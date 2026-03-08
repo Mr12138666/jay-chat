@@ -9,6 +9,9 @@ export interface ChatMessage {
   senderNickname?: string
   content: string
   contentType?: string
+  replyToId?: number
+  replyToNickname?: string
+  replyToContent?: string
   sentAt?: string
 }
 
@@ -211,7 +214,7 @@ class WebSocketService {
   /**
    * 发送消息
    */
-  sendMessage(sessionId: number, content: string, contentType: string = 'text') {
+  sendMessage(sessionId: number, content: string, contentType: string = 'text', replyToId?: number) {
     // 直接检查 client 是否激活，不依赖 isConnected() 方法
     if (!this.client || !this.client.active) {
       console.error('WebSocket 未连接，无法发送消息', {
@@ -222,13 +225,18 @@ class WebSocketService {
       return false
     }
 
-    const message = {
+    const message: Record<string, unknown> = {
       sessionId,
       content,
       contentType
     }
 
-    console.log('发送消息到 /app/chat.send:', message)
+    // 如果有引用消息，添加引用信息
+    if (replyToId) {
+      message.replyToId = replyToId
+    }
+
+    debugLog('发送消息到 /app/chat.send:', message)
     try {
       this.client.publish({
         destination: '/app/chat.send',

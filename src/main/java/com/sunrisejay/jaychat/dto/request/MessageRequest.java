@@ -10,7 +10,7 @@ import jakarta.validation.constraints.NotNull;
  */
 @Data
 public class MessageRequest {
-    
+
     @NotNull(message = "会话ID不能为空")
     private Long sessionId;
 
@@ -18,4 +18,9 @@ public class MessageRequest {
     private String content;
 
     private String contentType = "text"; // 默认文本消息
+
+    /**
+     * 引用的消息ID
+     */
+    private Long replyToId;
 }

@@ -11,6 +11,7 @@ defineProps<{
 const emit = defineEmits<{
   openUserDetail: [userId: number]
   openImagePreview: [imageUrl: string]
+  replyMessage: [message: { id: number; sender: string; content: string }]
 }>()
 </script>
 
@@ -44,6 +45,12 @@ const emit = defineEmits<{
         <div class="message-meta">
           <span class="sender">{{ msg.sender }}</span>
           <span class="time">{{ msg.time }}</span>
+          <button class="reply-btn" @click.stop="emit('replyMessage', { id: msg.id, sender: msg.sender, content: msg.content })" title="回复">↩</button>
+        </div>
+        <!-- 引用消息显示 -->
+        <div v-if="msg.replyToId" class="reply-quote">
+          <span class="reply-quote-label">回复 {{ msg.replyToNickname }}:</span>
+          <span class="reply-quote-content">{{ msg.replyToContent }}</span>
         </div>
         <div
           class="message-content"
@@ -167,6 +174,51 @@ const emit = defineEmits<{
   display: flex;
   gap: 8px;
   align-items: center;
+}
+
+.reply-btn {
+  background: none;
+  border: none;
+  color: #666;
+  cursor: pointer;
+  font-size: 14px;
+  padding: 2px 6px;
+  border-radius: 4px;
+  opacity: 0;
+  transition: opacity 0.2s;
+}
+
+.message:hover .reply-btn {
+  opacity: 1;
+}
+
+.reply-btn:hover {
+  color: #667eea;
+  background: rgba(102, 126, 234, 0.1);
+}
+
+.reply-quote {
+  padding: 6px 10px;
+  background: rgba(0, 0, 0, 0.2);
+  border-left: 2px solid #667eea;
+  border-radius: 4px;
+  margin-bottom: 4px;
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+}
+
+.reply-quote-label {
+  color: #667eea;
+  font-size: 11px;
+}
+
+.reply-quote-content {
+  color: #999;
+  font-size: 12px;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
 }
 
 .sender {

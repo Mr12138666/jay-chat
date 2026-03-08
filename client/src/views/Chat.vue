@@ -107,6 +107,9 @@ const {
   toggleEmojiPicker,
   closeEmojiPicker,
   selectEmoji,
+  replyingTo,
+  setReplyingTo,
+  cancelReply,
   handleImageFileChange,
   openImagePreview,
   closeImagePreview,
@@ -837,6 +840,7 @@ onUnmounted(() => {
           :current-user-id="currentUser?.id"
           @open-user-detail="openUserDetail"
           @open-image-preview="openImagePreview"
+          @reply-message="setReplyingTo"
         />
       </section>
       <section v-else class="chat-messages empty-state">
@@ -849,11 +853,13 @@ onUnmounted(() => {
         :ws-connected="wsConnected"
         :uploading-image="uploadingImage"
         :show-emoji-picker="showEmojiPicker"
+        :replying-to="replyingTo"
         @send="sendMessage"
         @toggle-emoji="toggleEmojiPicker"
         @close-emoji="closeEmojiPicker"
         @select-emoji="selectEmoji"
         @image-selected="handleImageFileChange"
+        @cancel-reply="cancelReply"
       />
 
       <!-- 图片预览弹窗 -->

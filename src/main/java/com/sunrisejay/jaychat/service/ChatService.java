@@ -78,23 +78,33 @@ public class ChatService {
 
         // 转换表情代码为Unicode表情
         String content = emojiUtil.convertEmojiCodes(request.getContent());
-        
+
         // 保存消息
         ChatMessage message = new ChatMessage();
         message.setSessionId(request.getSessionId());
         message.setSenderId(senderId);
         message.setContent(content);
         message.setContentType(request.getContentType());
+        message.setReplyToId(request.getReplyToId());
         messageMapper.insert(message);
-        
+
         // 更新用户的上次发言时间
         userMapper.updateLastMessageAt(senderId);
 
         // 查询发送者信息并转换为响应
         User user = userMapper.selectById(senderId);
-        MessageResponse response = messageConverter.toResponse(message, user);
 
-        logger.debug("消息发送成功: messageId={}, sessionId={}, senderId={}", 
+        // 如果有引用消息，获取被引用消息的信息
+        MessageResponse response;
+        if (request.getReplyToId() != null) {
+            ChatMessage replyToMessage = messageMapper.selectById(request.getReplyToId());
+            User replyToUser = replyToMessage != null ? userMapper.selectById(replyToMessage.getSenderId()) : null;
+            response = messageConverter.toResponseWithReply(message, user, replyToMessage, replyToUser);
+        } else {
+            response = messageConverter.toResponse(message, user);
+        }
+
+        logger.debug("消息发送成功: messageId={}, sessionId={}, senderId={}",
                 message.getId(), request.getSessionId(), senderId);
         return response;
     }

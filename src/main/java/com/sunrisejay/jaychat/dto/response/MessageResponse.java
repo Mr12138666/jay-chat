@@ -15,5 +15,17 @@ public class MessageResponse {
     private String senderNickname;
     private String content;
     private String contentType;
+    /**
+     * 引用的消息ID
+     */
+    private Long replyToId;
+    /**
+     * 被引用消息的发送者昵称
+     */
+    private String replyToNickname;
+    /**
+     * 被引用消息的内容摘要
+     */
+    private String replyToContent;
     private LocalDateTime sentAt;
 }

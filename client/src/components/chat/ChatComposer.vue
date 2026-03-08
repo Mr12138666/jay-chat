@@ -7,6 +7,7 @@ const props = defineProps<{
   wsConnected: boolean
   uploadingImage: boolean
   showEmojiPicker: boolean
+  replyingTo: { id: number; sender: string; content: string } | null
 }>()
 
 const emit = defineEmits<{
@@ -16,6 +17,7 @@ const emit = defineEmits<{
   closeEmoji: []
   selectEmoji: [code: string]
   imageSelected: [file: File]
+  cancelReply: []
 }>()
 
 const imageFileInput = ref<HTMLInputElement | null>(null)
@@ -41,6 +43,14 @@ const handleImageFileChange = (event: Event) => {
 
 <template>
   <footer class="chat-input">
+    <!-- 回复消息显示 -->
+    <div v-if="replyingTo" class="reply-preview">
+      <div class="reply-content">
+        <span class="reply-label">回复 {{ replyingTo.sender }}:</span>
+        <span class="reply-text">{{ replyingTo.content }}</span>
+      </div>
+      <button class="reply-cancel" @click="emit('cancelReply')" title="取消回复">×</button>
+    </div>
     <div class="input-wrapper">
       <button
         @click="openImageFileDialog"
@@ -99,8 +109,54 @@ const handleImageFileChange = (event: Event) => {
   border-top: 1px solid #333;
   background: #252525;
   display: flex;
+  flex-direction: column;
   gap: 12px;
+  align-items: stretch;
+}
+
+.reply-preview {
+  display: flex;
   align-items: center;
+  gap: 8px;
+  padding: 8px 12px;
+  background: #1a1a1a;
+  border-left: 3px solid #667eea;
+  border-radius: 4px;
+}
+
+.reply-content {
+  flex: 1;
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  overflow: hidden;
+}
+
+.reply-label {
+  color: #667eea;
+  font-size: 12px;
+  white-space: nowrap;
+}
+
+.reply-text {
+  color: #999;
+  font-size: 12px;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.reply-cancel {
+  background: none;
+  border: none;
+  color: #666;
+  font-size: 18px;
+  cursor: pointer;
+  padding: 0 4px;
+}
+
+.reply-cancel:hover {
+  color: #999;
 }
 
 .input-wrapper {

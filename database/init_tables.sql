@@ -40,6 +40,7 @@ CREATE TABLE IF NOT EXISTS `chat_message` (
   `sender_id` BIGINT UNSIGNED NOT NULL,
   `content` TEXT NOT NULL,
   `content_type` VARCHAR(32) NOT NULL DEFAULT 'text',
+  `reply_to_id` BIGINT UNSIGNED DEFAULT NULL COMMENT '引用的消息ID',
   `sent_at` DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP,
   PRIMARY KEY (`id`),
   KEY `idx_session_time` (`session_id`,`sent_at`)

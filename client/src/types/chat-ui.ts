@@ -6,5 +6,8 @@ export interface UiChatMessage {
   senderId?: number
   senderAvatar?: string | null
   contentType?: string
+  replyToId?: number
+  replyToNickname?: string
+  replyToContent?: string
 }
 

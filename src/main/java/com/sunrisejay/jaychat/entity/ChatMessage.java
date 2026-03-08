@@ -23,5 +23,10 @@ public class ChatMessage {
      */
     private String contentType;
 
+    /**
+     * 引用的消息ID
+     */
+    private Long replyToId;
+
     private LocalDateTime sentAt;
 }

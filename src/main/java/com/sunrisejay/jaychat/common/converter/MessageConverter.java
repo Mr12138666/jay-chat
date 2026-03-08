@@ -50,4 +50,38 @@ public class MessageConverter {
 
         return response;
     }
+
+    /**
+     * 将 ChatMessage 和 User 转换为 MessageResponse（包含引用消息信息）
+     */
+    public MessageResponse toResponseWithReply(ChatMessage message, User sender, ChatMessage replyToMessage, User replyToUser) {
+        MessageResponse response = toResponse(message, sender);
+
+        if (response == null) {
+            return null;
+        }
+
+        // 设置引用消息信息
+        if (replyToMessage != null) {
+            response.setReplyToId(replyToMessage.getId());
+
+            // 设置被引用消息的发送者昵称
+            if (replyToUser != null) {
+                String replyToNickname = replyToUser.getNickname();
+                if (replyToNickname == null || replyToNickname.trim().isEmpty()) {
+                    replyToNickname = replyToUser.getUsername();
+                }
+                response.setReplyToNickname(replyToNickname);
+            }
+
+            // 设置被引用消息的内容摘要（截取前50个字符）
+            String replyContent = replyToMessage.getContent();
+            if (replyContent != null && replyContent.length() > 50) {
+                replyContent = replyContent.substring(0, 50) + "...";
+            }
+            response.setReplyToContent(replyContent);
+        }
+
+        return response;
+    }
 }
