@@ -28,4 +28,8 @@ public class MessageResponse {
      */
     private String replyToContent;
     private LocalDateTime sentAt;
+    /**
+     * 是否已撤回
+     */
+    private Boolean recalled;
 }

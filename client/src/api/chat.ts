@@ -21,6 +21,7 @@ export interface MessageResponse {
   replyToNickname?: string
   replyToContent?: string
   sentAt: string
+  recalled?: boolean
 }
 
 // 获取或创建默认会话
@@ -114,4 +115,9 @@ export const getPrivateSessionOtherMember = (sessionId: number): Promise<Contact
 // 删除会话（退出会话）
 export const deleteSession = (sessionId: number): Promise<void> => {
   return request.delete(`/api/chat/sessions/${sessionId}`)
+}
+
+// 撤回消息
+export const recallMessage = (messageId: number): Promise<MessageResponse> => {
+  return request.post(`/api/chat/messages/${messageId}/recall`)
 }

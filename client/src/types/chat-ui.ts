@@ -9,5 +9,6 @@ export interface UiChatMessage {
   replyToId?: number
   replyToNickname?: string
   replyToContent?: string
+  recalled?: boolean
 }
 

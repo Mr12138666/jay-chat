@@ -13,6 +13,7 @@ export interface ChatMessage {
   replyToNickname?: string
   replyToContent?: string
   sentAt?: string
+  recalled?: boolean
 }
 
 // 开发环境标识

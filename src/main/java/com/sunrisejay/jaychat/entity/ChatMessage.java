@@ -28,5 +28,10 @@ public class ChatMessage {
      */
     private Long replyToId;
 
+    /**
+     * 是否已撤回：0-否，1-是
+     */
+    private Integer isRecalled;
+
     private LocalDateTime sentAt;
 }

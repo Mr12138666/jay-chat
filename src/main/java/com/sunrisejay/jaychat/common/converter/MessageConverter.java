@@ -27,6 +27,7 @@ public class MessageConverter {
         response.setContent(message.getContent());
         response.setContentType(message.getContentType());
         response.setSentAt(message.getSentAt());
+        response.setRecalled(message.getIsRecalled() != null && message.getIsRecalled() == 1);
         return response;
     }
 

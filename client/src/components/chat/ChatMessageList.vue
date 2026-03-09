@@ -12,6 +12,7 @@ const emit = defineEmits<{
   openUserDetail: [userId: number]
   openImagePreview: [imageUrl: string]
   replyMessage: [message: { id: number; sender: string; content: string }]
+  recallMessage: [messageId: number]
 }>()
 </script>
 
@@ -45,6 +46,13 @@ const emit = defineEmits<{
         <div class="message-meta">
           <span class="sender">{{ msg.sender }}</span>
           <span class="time">{{ msg.time }}</span>
+          <!-- 撤回按钮：仅消息发送者可见，且消息未被撤回 -->
+          <button
+            v-if="msg.senderId === currentUserId && !msg.recalled"
+            class="recall-btn"
+            @click.stop="emit('recallMessage', msg.id)"
+            title="撤回"
+          >↙</button>
           <button class="reply-btn" @click.stop="emit('replyMessage', { id: msg.id, sender: msg.sender, content: msg.content })" title="回复">↩</button>
         </div>
         <!-- 引用消息显示 -->
@@ -53,6 +61,13 @@ const emit = defineEmits<{
           <span class="reply-quote-content">{{ msg.replyToContent }}</span>
         </div>
         <div
+          v-if="msg.recalled"
+          class="message-content recalled"
+        >
+          <span class="recalled-text">你撤回了一条消息</span>
+        </div>
+        <div
+          v-else
           class="message-content"
           :class="{ 'image-content': msg.contentType === 'image' }"
           :style="msg.senderId !== currentUserId ? {
@@ -201,6 +216,38 @@ const emit = defineEmits<{
 .reply-btn:hover {
   color: #ff6b9d;
   background: rgba(255, 107, 157, 0.1);
+}
+
+.recall-btn {
+  background: none;
+  border: none;
+  color: var(--text-light);
+  cursor: pointer;
+  font-size: 14px;
+  padding: 4px 8px;
+  border-radius: var(--radius-sm);
+  opacity: 0;
+  transition: all 0.2s;
+}
+
+.message:hover .recall-btn {
+  opacity: 1;
+}
+
+.recall-btn:hover {
+  color: #ff6b9d;
+  background: rgba(255, 107, 157, 0.1);
+}
+
+.recalled {
+  background: rgba(0, 0, 0, 0.03) !important;
+  border: 1px dashed rgba(0, 0, 0, 0.1) !important;
+}
+
+.recalled-text {
+  color: var(--text-light);
+  font-size: 12px;
+  font-style: italic;
 }
 
 .reply-quote {

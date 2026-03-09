@@ -21,6 +21,8 @@ import org.slf4j.LoggerFactory;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
 
+import java.time.LocalDateTime;
+import java.time.temporal.ChronoUnit;
 import java.util.List;
 import java.util.Set;
 import java.util.stream.Collectors;
@@ -33,6 +35,11 @@ import java.util.stream.Collectors;
 public class ChatService {
 
     private static final Logger logger = LoggerFactory.getLogger(ChatService.class);
+
+    /**
+     * 消息可撤回时间限制（分钟）
+     */
+    private static final int RECALL_TIME_LIMIT_MINUTES = 5;
 
     private final ChatMessageMapper messageMapper;
     private final ChatSessionMapper sessionMapper;
@@ -353,6 +360,50 @@ public class ChatService {
             memberMapper.delete(sessionId, userId);
             logger.info("退出群聊: sessionId={}, userId={}", sessionId, userId);
         }
+    }
+
+    /**
+     * 撤回消息
+     * @param messageId 消息ID
+     * @param userId 当前用户ID
+     * @return 被撤回的消息响应
+     */
+    @Transactional
+    public MessageResponse recallMessage(Long messageId, Long userId) {
+        // 查询消息
+        ChatMessage message = messageMapper.selectById(messageId);
+        if (message == null) {
+            throw new BusinessException("消息不存在");
+        }
+
+        // 验证是否为自己的消息
+        if (!message.getSenderId().equals(userId)) {
+            throw new BusinessException("只能撤回自己发送的消息");
+        }
+
+        // 检查是否已撤回
+        if (message.getIsRecalled() != null && message.getIsRecalled() == 1) {
+            throw new BusinessException("消息已被撤回");
+        }
+
+        // 检查是否在可撤回时间内（5分钟）
+        long minutesDiff = ChronoUnit.MINUTES.between(message.getSentAt(), LocalDateTime.now());
+        if (minutesDiff > RECALL_TIME_LIMIT_MINUTES) {
+            throw new BusinessException("消息已超过" + RECALL_TIME_LIMIT_MINUTES + "分钟，无法撤回");
+        }
+
+        // 执行撤回
+        messageMapper.updateRecalled(messageId);
+
+        // 获取发送者信息
+        User sender = userMapper.selectById(userId);
+
+        // 转换为响应
+        MessageResponse response = messageConverter.toResponse(message, sender);
+        response.setRecalled(true);
+
+        logger.info("消息撤回成功: messageId={}, userId={}", messageId, userId);
+        return response;
     }
 
 }

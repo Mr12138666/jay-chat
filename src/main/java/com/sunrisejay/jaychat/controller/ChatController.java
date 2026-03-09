@@ -262,4 +262,26 @@ public class ChatController extends BaseController {
         chatService.deleteSession(sessionId, userId);
         return ApiResponse.success(null);
     }
+
+    /**
+     * 撤回消息
+     */
+    @PostMapping("/messages/{messageId}/recall")
+    public ApiResponse<MessageResponse> recallMessage(
+            @PathVariable("messageId") Long messageId,
+            HttpServletRequest request) {
+        ApiResponse<?> authCheck = checkAuth(request);
+        if (authCheck != null) {
+            return (ApiResponse<MessageResponse>) authCheck;
+        }
+
+        Long userId = getCurrentUserId(request);
+        MessageResponse response = chatService.recallMessage(messageId, userId);
+
+        // 广播撤回通知到会话的所有成员
+        String destination = WebSocketConstants.TOPIC_SESSION_PREFIX + response.getSessionId();
+        messagingTemplate.convertAndSend(destination, response);
+
+        return ApiResponse.success(response);
+    }
 }

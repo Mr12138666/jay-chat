@@ -13,6 +13,7 @@ import {
   createPrivateSession,
   getPrivateSessionOtherMember,
   deleteSession,
+  recallMessage,
   type ChatSession,
   type SessionMember,
   type SessionMemberStats,
@@ -114,7 +115,8 @@ const {
   handleImageFileChange,
   openImagePreview,
   closeImagePreview,
-  handleMessage
+  handleMessage,
+  handleRecallMessage
 } = useChatMessages({
   currentSessionId,
   currentUser,
@@ -188,7 +190,7 @@ const loadSessions = async () => {
     // 订阅所有会话（这样可以收到所有会话的消息）
     if (wsConnected.value || wsService.isConnected()) {
       const allSessionIds = sessions.value.map(s => s.id)
-      wsService.subscribeToAllSessions(allSessionIds, handleMessage)
+      wsService.subscribeToAllSessions(allSessionIds, handleWsMessage)
       console.log('已订阅所有会话:', allSessionIds)
     }
 
@@ -221,7 +223,7 @@ const loadSessions = async () => {
       await loadMessages(defaultSession.id)
       if (wsConnected.value || wsService.isConnected()) {
         const allSessionIds = sessions.value.map(s => s.id)
-        wsService.subscribeToAllSessions(allSessionIds, handleMessage)
+        wsService.subscribeToAllSessions(allSessionIds, handleWsMessage)
       }
     } catch (createError) {
       console.error('创建默认会话也失败:', createError)
@@ -330,7 +332,7 @@ const switchSession = async (sessionId: number) => {
   // 订阅所有会话的消息（保持对所有会话的订阅，以便显示未读红点）
   if (wsConnected.value || wsService.isConnected()) {
     const allSessionIds = sessions.value.map(s => s.id)
-    wsService.subscribeToAllSessions(allSessionIds, handleMessage)
+    wsService.subscribeToAllSessions(allSessionIds, handleWsMessage)
   }
 
   // 加载新会话的成员统计
@@ -624,6 +626,17 @@ const handleResize = () => {
   }
 }
 
+// 撤回消息
+const handleRecallMessageClick = async (messageId: number) => {
+  try {
+    await recallMessage(messageId)
+    showSuccess('消息已撤回')
+  } catch (error: unknown) {
+    const errorMessage = handleApiError(error)
+    showError(errorMessage)
+  }
+}
+
 onMounted(async () => {
   // 从本地存储读取用户信息和Token
   const user = getUser<UserInfo>()
@@ -663,10 +676,19 @@ onMounted(async () => {
     wsConnected.value = connected
     console.log('WebSocket 连接状态变更:', connected)
   })
-  
+
+  // 包装消息处理函数，区分普通消息和撤回消息
+  const handleWsMessage = (message: import('../utils/websocket').ChatMessage) => {
+    if (message.recalled) {
+      handleRecallMessage(message)
+    } else {
+      handleMessage(message)
+    }
+  }
+
   // 使用新的 token 连接 WebSocket
   // 注意：connect 的回调中会自动订阅 currentSessionId（如果已设置）
-  wsService.connect(token, handleMessage, (error) => {
+  wsService.connect(token, handleWsMessage, (error) => {
     console.error('WebSocket 连接错误:', error)
     wsConnected.value = false
     // 连接失败时，显示错误提示
@@ -682,7 +704,7 @@ onMounted(async () => {
       if (wsConnected.value || wsService.isConnected()) {
         console.log('WebSocket 已连接，立即订阅所有会话')
         const allSessionIds = sessions.value.map(s => s.id)
-        wsService.subscribeToAllSessions(allSessionIds, handleMessage)
+        wsService.subscribeToAllSessions(allSessionIds, handleWsMessage)
       } else {
         console.log('WebSocket 未连接，等待连接成功后自动订阅所有会话')
         // 如果 3 秒后还没连接，再次尝试订阅
@@ -690,7 +712,7 @@ onMounted(async () => {
           if (sessions.value.length > 0 && (wsConnected.value || wsService.isConnected())) {
             console.log('延迟订阅所有会话')
             const allSessionIds = sessions.value.map(s => s.id)
-            wsService.subscribeToAllSessions(allSessionIds, handleMessage)
+            wsService.subscribeToAllSessions(allSessionIds, handleWsMessage)
           }
         }, 3000)
       }
@@ -896,6 +918,7 @@ onUnmounted(() => {
           @open-user-detail="openUserDetail"
           @open-image-preview="openImagePreview"
           @reply-message="setReplyingTo"
+          @recall-message="handleRecallMessageClick"
         />
       </section>
       <section v-else class="chat-messages empty-state">

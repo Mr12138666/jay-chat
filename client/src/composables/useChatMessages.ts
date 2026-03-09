@@ -64,7 +64,8 @@ export const useChatMessages = ({
         contentType: msg.contentType || 'text',
         replyToId: msg.replyToId,
         replyToNickname: msg.replyToNickname,
-        replyToContent: msg.replyToContent
+        replyToContent: msg.replyToContent,
+        recalled: msg.recalled
       })).reverse()
 
       await nextTick()
@@ -262,10 +263,19 @@ export const useChatMessages = ({
       contentType: message.contentType || 'text',
       replyToId: message.replyToId,
       replyToNickname: message.replyToNickname,
-      replyToContent: message.replyToContent
+      replyToContent: message.replyToContent,
+      recalled: message.recalled
     })
 
     nextTick(() => scrollToBottom(true))
+  }
+
+  // 处理撤回消息
+  const handleRecallMessage = (message: ChatMessage) => {
+    const msgIndex = messages.value.findIndex(msg => msg.id === message.id)
+    if (msgIndex !== -1) {
+      messages.value[msgIndex].recalled = true
+    }
   }
 
   return {
@@ -287,7 +297,8 @@ export const useChatMessages = ({
     handleImageFileChange,
     openImagePreview,
     closeImagePreview,
-    handleMessage
+    handleMessage,
+    handleRecallMessage
   }
 }
 
