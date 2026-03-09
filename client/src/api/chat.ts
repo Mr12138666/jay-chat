@@ -6,6 +6,7 @@ export interface ChatSession {
   type: string // private / group
   name: string | null
   ownerId: number | null
+  notice?: string | null
   createdAt: string
 }
 
@@ -120,4 +121,63 @@ export const deleteSession = (sessionId: number): Promise<void> => {
 // 撤回消息
 export const recallMessage = (messageId: number): Promise<MessageResponse> => {
   return request.post(`/api/chat/messages/${messageId}/recall`)
+}
+
+// ==================== 群管理 API ====================
+
+// 创建群聊
+export interface CreateGroupRequest {
+  groupName: string
+  memberIds: number[]
+}
+
+export const createGroup = (data: CreateGroupRequest): Promise<ChatSession> => {
+  return request.post('/api/chat/groups', data)
+}
+
+// 获取群信息
+export const getGroupInfo = (sessionId: number): Promise<ChatSession> => {
+  return request.get(`/api/chat/groups/${sessionId}`)
+}
+
+// 更新群信息
+export interface UpdateGroupInfoRequest {
+  groupName: string
+  notice?: string
+}
+
+export const updateGroupInfo = (sessionId: number, data: UpdateGroupInfoRequest): Promise<void> => {
+  return request.put(`/api/chat/groups/${sessionId}`, data)
+}
+
+// 邀请成员
+export const inviteMembers = (sessionId: number, userIds: number[]): Promise<void> => {
+  return request.post(`/api/chat/groups/${sessionId}/members`, { userIds })
+}
+
+// 移除成员
+export const removeMember = (sessionId: number, userId: number): Promise<void> => {
+  return request.delete(`/api/chat/groups/${sessionId}/members/${userId}`)
+}
+
+// 退群
+export const leaveGroup = (sessionId: number): Promise<void> => {
+  return request.post(`/api/chat/groups/${sessionId}/leave`)
+}
+
+// 解散群聊
+export const dissolveGroup = (sessionId: number): Promise<void> => {
+  return request.delete(`/api/chat/groups/${sessionId}`)
+}
+
+// 转让群主
+export const transferOwner = (sessionId: number, newOwnerId: number): Promise<void> => {
+  return request.post(`/api/chat/groups/${sessionId}/transfer`, null, {
+    params: { newOwnerId }
+  })
+}
+
+// 检查是否是群主
+export const isGroupOwner = (sessionId: number): Promise<boolean> => {
+  return request.get(`/api/chat/groups/${sessionId}/is-owner`)
 }

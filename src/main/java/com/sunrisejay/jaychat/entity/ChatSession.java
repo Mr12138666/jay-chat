@@ -25,5 +25,10 @@ public class ChatSession {
      */
     private Long ownerId;
 
+    /**
+     * 群公告
+     */
+    private String notice;
+
     private LocalDateTime createdAt;
 }

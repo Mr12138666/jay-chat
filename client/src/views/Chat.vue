@@ -1,5 +1,5 @@
 <script setup lang="ts">
-import { ref, onMounted, onUnmounted } from 'vue'
+import { ref, computed, onMounted, onUnmounted } from 'vue'
 import { useRouter } from 'vue-router'
 import type { UserInfo, UserDetail } from '../api/auth'
 import { updateNickname, getUserDetail, uploadAvatar } from '../api/auth'
@@ -14,6 +14,8 @@ import {
   getPrivateSessionOtherMember,
   deleteSession,
   recallMessage,
+  getGroupInfo,
+  createGroup,
   type ChatSession,
   type SessionMember,
   type SessionMemberStats,
@@ -26,6 +28,7 @@ import { handleApiError, showError, showSuccess } from '../utils/error'
 import MembersModal from '../components/chat/MembersModal.vue'
 import ChatMessageList from '../components/chat/ChatMessageList.vue'
 import ChatComposer from '../components/chat/ChatComposer.vue'
+import GroupSettings from '../components/chat/GroupSettings.vue'
 import { validateAvatarFile, withCacheBuster } from '../utils/avatar'
 import { useChatMessages } from '../composables/useChatMessages'
 
@@ -59,6 +62,16 @@ const members = ref<SessionMember[]>([])
 const memberStats = ref<SessionMemberStats | null>(null)
 const onlineUserIds = ref<Set<number>>(new Set())
 const loadingMembers = ref(false)
+
+// 群设置相关
+const showGroupSettings = ref(false)
+const currentGroupInfo = ref<ChatSession | null>(null)
+
+// 创建群聊相关
+const showCreateGroup = ref(false)
+const createGroupName = ref('')
+const createGroupMembers = ref<number[]>([])
+const creatingGroup = ref(false)
 
 const userAvatarCache = ref<Map<number, string | null>>(new Map())
 
@@ -552,6 +565,85 @@ const closeMembersList = () => {
   showMembersList.value = false
 }
 
+// 打开群设置
+const openGroupSettings = async () => {
+  if (!currentSessionId.value) return
+  try {
+    const groupInfo = await getGroupInfo(currentSessionId.value)
+    currentGroupInfo.value = groupInfo
+    showGroupSettings.value = true
+  } catch (error: any) {
+    showError('获取群信息失败')
+  }
+}
+
+// 关闭群设置
+const closeGroupSettings = () => {
+  showGroupSettings.value = false
+  currentGroupInfo.value = null
+}
+
+// 更新群信息后刷新
+const handleGroupUpdate = async () => {
+  if (!currentSessionId.value) return
+  // 刷新会话列表
+  await loadSessions()
+  // 刷新群信息
+  const groupInfo = await getGroupInfo(currentSessionId.value)
+  currentGroupInfo.value = groupInfo
+  // 刷新成员列表
+  await loadMembersData()
+}
+
+// 踢出成员后刷新
+const handleKickMember = async () => {
+  await loadMembersData()
+}
+
+// 判断当前会话是否是群聊
+const isCurrentSessionGroup = computed(() => {
+  const session = sessions.value.find(s => s.id === currentSessionId.value)
+  return session?.type === 'group'
+})
+
+// 打开创建群聊弹窗
+const openCreateGroup = () => {
+  showCreateGroup.value = true
+  createGroupName.value = ''
+  createGroupMembers.value = []
+}
+
+// 关闭创建群聊弹窗
+const closeCreateGroup = () => {
+  showCreateGroup.value = false
+}
+
+// 创建群聊
+const doCreateGroup = async () => {
+  if (!createGroupName.value.trim()) {
+    showError('请输入群名称')
+    return
+  }
+  creatingGroup.value = true
+  try {
+    const newGroup = await createGroup({
+      groupName: createGroupName.value.trim(),
+      memberIds: createGroupMembers.value
+    })
+    closeCreateGroup()
+    // 刷新会话列表
+    await loadSessions()
+    // 切换到新创建的群
+    await switchSession(newGroup.id)
+    showSuccess('群聊创建成功')
+  } catch (error: unknown) {
+    const msg = handleApiError(error)
+    showError(msg)
+  } finally {
+    creatingGroup.value = false
+  }
+}
+
 // 加载成员数据
 const loadMembersData = async () => {
   if (!currentSessionId.value) return
@@ -796,6 +888,9 @@ onUnmounted(() => {
           >
             联系人
           </button>
+          <button class="tab-btn create-group-btn" @click="openCreateGroup" title="创建群聊">
+            + 建群
+          </button>
         </div>
 
         <!-- 会话列表 -->
@@ -881,9 +976,17 @@ onUnmounted(() => {
                 ({{ getCurrentSessionStats()?.totalMembers || 0 }})
               </span>
             </h2>
-            <button 
-              v-if="currentSessionId && sessions.find(s => s.id === currentSessionId)?.type === 'group'"
-              @click="openMembersList" 
+            <button
+              v-if="currentSessionId && isCurrentSessionGroup"
+              @click="openGroupSettings"
+              class="members-btn"
+              title="群设置"
+            >
+              ⚙️
+            </button>
+            <button
+              v-if="currentSessionId && isCurrentSessionGroup"
+              @click="openMembersList"
               class="members-btn"
               title="查看群成员"
             >
@@ -1083,6 +1186,51 @@ onUnmounted(() => {
       :is-user-online="isUserOnline"
       @close="closeMembersList"
     />
+
+    <!-- 群设置弹窗 -->
+    <GroupSettings
+      :show="showGroupSettings"
+      :session="currentGroupInfo"
+      :members="members"
+      :current-user-id="currentUser?.id"
+      @close="closeGroupSettings"
+      @update="handleGroupUpdate"
+      @kick-member="handleKickMember"
+    />
+
+    <!-- 创建群聊弹窗 -->
+    <div v-if="showCreateGroup" class="modal-overlay" @click.self="closeCreateGroup">
+      <div class="modal-content">
+        <div class="modal-header">
+          <h2>创建群聊</h2>
+          <button class="close-btn" @click="closeCreateGroup">×</button>
+        </div>
+        <div class="modal-body">
+          <div class="form-group">
+            <label>群名称</label>
+            <input v-model="createGroupName" type="text" placeholder="请输入群名称" />
+          </div>
+          <div class="form-group">
+            <label>选择成员</label>
+            <div class="member-select">
+              <label v-for="user in contacts" :key="user.userId" class="member-option">
+                <input type="checkbox" v-model="createGroupMembers" :value="user.userId" />
+                <img v-if="user.avatar" :src="user.avatar" class="member-avatar" />
+                <div v-else class="member-avatar-placeholder">
+                  {{ user.nickname?.[0] || user.username[0] }}
+                </div>
+                <span>{{ user.nickname || user.username }}</span>
+              </label>
+            </div>
+          </div>
+        </div>
+        <div class="modal-footer">
+          <button class="btn-primary" @click="doCreateGroup" :disabled="creatingGroup">
+            {{ creatingGroup ? '创建中...' : '创建群聊' }}
+          </button>
+        </div>
+      </div>
+    </div>
   </div>
 </template>
 
@@ -2070,6 +2218,152 @@ onUnmounted(() => {
 .members-btn svg {
   width: 18px;
   height: 18px;
+}
+
+.create-group-btn {
+  margin-left: auto;
+  padding: 6px 12px;
+  background: linear-gradient(135deg, #ff6b9d, #ff9f43);
+  color: white;
+  border: none;
+  border-radius: 6px;
+  font-size: 12px;
+  cursor: pointer;
+}
+
+.create-group-btn:hover {
+  transform: scale(1.05);
+}
+
+.modal-overlay {
+  position: fixed;
+  top: 0;
+  left: 0;
+  right: 0;
+  bottom: 0;
+  background: rgba(0, 0, 0, 0.5);
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  z-index: 1000;
+}
+
+.modal-content {
+  background: white;
+  border-radius: 12px;
+  width: 90%;
+  max-width: 450px;
+  max-height: 80vh;
+  display: flex;
+  flex-direction: column;
+}
+
+.modal-header {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  padding: 16px 20px;
+  border-bottom: 1px solid #eee;
+}
+
+.modal-header h2 {
+  margin: 0;
+  font-size: 18px;
+}
+
+.close-btn {
+  background: none;
+  border: none;
+  font-size: 24px;
+  cursor: pointer;
+  color: #999;
+}
+
+.modal-body {
+  flex: 1;
+  overflow-y: auto;
+  padding: 20px;
+}
+
+.form-group {
+  margin-bottom: 16px;
+}
+
+.form-group label {
+  display: block;
+  font-size: 14px;
+  color: #666;
+  margin-bottom: 8px;
+}
+
+.form-group input[type="text"] {
+  width: 100%;
+  padding: 10px 12px;
+  border: 1px solid #ddd;
+  border-radius: 8px;
+  font-size: 14px;
+  box-sizing: border-box;
+}
+
+.member-select {
+  max-height: 200px;
+  overflow-y: auto;
+  border: 1px solid #ddd;
+  border-radius: 8px;
+}
+
+.member-option {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  padding: 10px;
+  cursor: pointer;
+}
+
+.member-option:hover {
+  background: #f9f9f9;
+}
+
+.member-option input {
+  width: 16px;
+  height: 16px;
+}
+
+.member-avatar,
+.member-avatar-placeholder {
+  width: 32px;
+  height: 32px;
+  border-radius: 6px;
+}
+
+.member-avatar-placeholder {
+  background: linear-gradient(135deg, #4ecdc4, #44a08d);
+  color: white;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  font-weight: 600;
+  font-size: 12px;
+}
+
+.modal-footer {
+  padding: 16px 20px;
+  border-top: 1px solid #eee;
+}
+
+.modal-footer .btn-primary {
+  width: 100%;
+  padding: 12px;
+  background: linear-gradient(135deg, #ff6b9d, #ff9f43);
+  color: white;
+  border: none;
+  border-radius: 8px;
+  font-size: 15px;
+  cursor: pointer;
+}
+
+.modal-footer .btn-primary:disabled {
+  opacity: 0.6;
 }
 
 .online-count {

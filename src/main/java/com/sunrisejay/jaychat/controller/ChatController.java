@@ -5,7 +5,10 @@ import com.sunrisejay.jaychat.common.constant.ApiConstants;
 import com.sunrisejay.jaychat.common.constant.WebSocketConstants;
 import com.sunrisejay.jaychat.common.converter.UserConverter;
 import com.sunrisejay.jaychat.controller.base.BaseController;
+import com.sunrisejay.jaychat.dto.request.CreateGroupRequest;
+import com.sunrisejay.jaychat.dto.request.InviteMemberRequest;
 import com.sunrisejay.jaychat.dto.request.MessageRequest;
+import com.sunrisejay.jaychat.dto.request.UpdateGroupInfoRequest;
 import com.sunrisejay.jaychat.dto.response.MessageResponse;
 import com.sunrisejay.jaychat.dto.response.SessionMemberResponse;
 import com.sunrisejay.jaychat.dto.response.SessionMemberStatsResponse;
@@ -283,5 +286,161 @@ public class ChatController extends BaseController {
         messagingTemplate.convertAndSend(destination, response);
 
         return ApiResponse.success(response);
+    }
+
+    /**
+     * 创建群聊
+     */
+    @PostMapping("/groups")
+    public ApiResponse<ChatSession> createGroup(
+            @Valid @RequestBody CreateGroupRequest request,
+            HttpServletRequest httpRequest) {
+        ApiResponse<?> authCheck = checkAuth(httpRequest);
+        if (authCheck != null) {
+            return (ApiResponse<ChatSession>) authCheck;
+        }
+
+        Long userId = getCurrentUserId(httpRequest);
+        ChatSession group = chatService.createGroup(userId, request.getGroupName(), request.getMemberIds());
+        return ApiResponse.success(group);
+    }
+
+    /**
+     * 获取群信息
+     */
+    @GetMapping("/groups/{sessionId}")
+    public ApiResponse<ChatSession> getGroupInfo(
+            @PathVariable("sessionId") Long sessionId,
+            HttpServletRequest request) {
+        ApiResponse<?> authCheck = checkAuth(request);
+        if (authCheck != null) {
+            return (ApiResponse<ChatSession>) authCheck;
+        }
+
+        ChatSession group = chatService.getGroupInfo(sessionId);
+        return ApiResponse.success(group);
+    }
+
+    /**
+     * 更新群信息（群主）
+     */
+    @PutMapping("/groups/{sessionId}")
+    public ApiResponse<Void> updateGroupInfo(
+            @PathVariable("sessionId") Long sessionId,
+            @RequestBody UpdateGroupInfoRequest request,
+            HttpServletRequest httpRequest) {
+        ApiResponse<?> authCheck = checkAuth(httpRequest);
+        if (authCheck != null) {
+            return (ApiResponse<Void>) authCheck;
+        }
+
+        Long userId = getCurrentUserId(httpRequest);
+        chatService.updateGroupInfo(sessionId, userId, request.getGroupName(), request.getNotice());
+        return ApiResponse.success(null);
+    }
+
+    /**
+     * 邀请成员
+     */
+    @PostMapping("/groups/{sessionId}/members")
+    public ApiResponse<Void> inviteMember(
+            @PathVariable("sessionId") Long sessionId,
+            @RequestBody InviteMemberRequest request,
+            HttpServletRequest httpRequest) {
+        ApiResponse<?> authCheck = checkAuth(httpRequest);
+        if (authCheck != null) {
+            return (ApiResponse<Void>) authCheck;
+        }
+
+        Long userId = getCurrentUserId(httpRequest);
+        chatService.inviteMember(sessionId, userId, request.getUserIds());
+        return ApiResponse.success(null);
+    }
+
+    /**
+     * 移除成员（群主操作）
+     */
+    @DeleteMapping("/groups/{sessionId}/members/{userId}")
+    public ApiResponse<Void> removeMember(
+            @PathVariable("sessionId") Long sessionId,
+            @PathVariable("userId") Long userId,
+            HttpServletRequest request) {
+        ApiResponse<?> authCheck = checkAuth(request);
+        if (authCheck != null) {
+            return (ApiResponse<Void>) authCheck;
+        }
+
+        Long operatorId = getCurrentUserId(request);
+        chatService.removeMember(sessionId, operatorId, userId);
+        return ApiResponse.success(null);
+    }
+
+    /**
+     * 退群
+     */
+    @PostMapping("/groups/{sessionId}/leave")
+    public ApiResponse<Void> leaveGroup(
+            @PathVariable("sessionId") Long sessionId,
+            HttpServletRequest request) {
+        ApiResponse<?> authCheck = checkAuth(request);
+        if (authCheck != null) {
+            return (ApiResponse<Void>) authCheck;
+        }
+
+        Long userId = getCurrentUserId(request);
+        chatService.leaveGroup(sessionId, userId);
+        return ApiResponse.success(null);
+    }
+
+    /**
+     * 解散群聊
+     */
+    @DeleteMapping("/groups/{sessionId}")
+    public ApiResponse<Void> dissolveGroup(
+            @PathVariable("sessionId") Long sessionId,
+            HttpServletRequest request) {
+        ApiResponse<?> authCheck = checkAuth(request);
+        if (authCheck != null) {
+            return (ApiResponse<Void>) authCheck;
+        }
+
+        Long userId = getCurrentUserId(request);
+        chatService.dissolveGroup(sessionId, userId);
+        return ApiResponse.success(null);
+    }
+
+    /**
+     * 转让群主
+     */
+    @PostMapping("/groups/{sessionId}/transfer")
+    public ApiResponse<Void> transferOwner(
+            @PathVariable("sessionId") Long sessionId,
+            @RequestParam("newOwnerId") Long newOwnerId,
+            HttpServletRequest request) {
+        ApiResponse<?> authCheck = checkAuth(request);
+        if (authCheck != null) {
+            return (ApiResponse<Void>) authCheck;
+        }
+
+        Long userId = getCurrentUserId(request);
+        chatService.transferOwner(sessionId, userId, newOwnerId);
+        return ApiResponse.success(null);
+    }
+
+    /**
+     * 检查用户是否是群主
+     */
+    @GetMapping("/groups/{sessionId}/is-owner")
+    public ApiResponse<Boolean> isGroupOwner(
+            @PathVariable("sessionId") Long sessionId,
+            HttpServletRequest request) {
+        ApiResponse<?> authCheck = checkAuth(request);
+        if (authCheck != null) {
+            return (ApiResponse<Boolean>) authCheck;
+        }
+
+        Long userId = getCurrentUserId(request);
+        boolean isOwner = chatService.isGroupOwner(sessionId, userId);
+        return ApiResponse.success(isOwner);
     }
 }

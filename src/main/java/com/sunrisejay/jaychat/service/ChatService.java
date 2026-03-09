@@ -406,4 +406,217 @@ public class ChatService {
         return response;
     }
 
+    /**
+     * 创建群聊
+     */
+    @Transactional
+    public ChatSession createGroup(Long userId, String groupName, List<Long> memberIds) {
+        if (groupName == null || groupName.trim().isEmpty()) {
+            throw new BusinessException("群名称不能为空");
+        }
+
+        // 创建群聊
+        ChatSession group = new ChatSession();
+        group.setType(SessionConstants.SESSION_TYPE_GROUP);
+        group.setName(groupName.trim());
+        group.setOwnerId(userId);
+
+        sessionMapper.insert(group);
+
+        // 添加群主和成员
+        memberMapper.insert(group.getId(), userId);
+        for (Long memberId : memberIds) {
+            if (!memberId.equals(userId)) {
+                memberMapper.insert(group.getId(), memberId);
+            }
+        }
+
+        logger.info("创建群聊成功: groupId={}, groupName={}, ownerId={}", group.getId(), groupName, userId);
+        return group;
+    }
+
+    /**
+     * 邀请用户加入群聊
+     */
+    @Transactional
+    public void inviteMember(Long sessionId, Long inviterId, List<Long> targetUserIds) {
+        ChatSession session = sessionMapper.selectById(sessionId);
+        if (session == null) {
+            throw new BusinessException("群聊不存在");
+        }
+
+        if (!SessionConstants.SESSION_TYPE_GROUP.equals(session.getType())) {
+            throw new BusinessException("只有群聊才能邀请成员");
+        }
+
+        // 检查邀请者是否是群成员
+        if (!memberMapper.exists(sessionId, inviterId)) {
+            throw new BusinessException("您不在该群聊中");
+        }
+
+        // 添加新成员
+        for (Long userId : targetUserIds) {
+            if (!memberMapper.exists(sessionId, userId)) {
+                memberMapper.insert(sessionId, userId);
+                logger.info("邀请成员入群: sessionId={}, inviterId={}, targetUserId={}", sessionId, inviterId, userId);
+            }
+        }
+    }
+
+    /**
+     * 移除群成员（群主或管理员操作）
+     */
+    @Transactional
+    public void removeMember(Long sessionId, Long operatorId, Long targetUserId) {
+        ChatSession session = sessionMapper.selectById(sessionId);
+        if (session == null) {
+            throw new BusinessException("群聊不存在");
+        }
+
+        if (!SessionConstants.SESSION_TYPE_GROUP.equals(session.getType())) {
+            throw new BusinessException("只有群聊才能移除成员");
+        }
+
+        // 检查操作者是否是群主
+        if (!session.getOwnerId().equals(operatorId)) {
+            throw new BusinessException("只有群主才能移除成员");
+        }
+
+        // 不能移除群主自己
+        if (session.getOwnerId().equals(targetUserId)) {
+            throw new BusinessException("不能移除群主");
+        }
+
+        // 检查目标用户是否在群中
+        if (!memberMapper.exists(sessionId, targetUserId)) {
+            throw new BusinessException("该用户不在群聊中");
+        }
+
+        memberMapper.delete(sessionId, targetUserId);
+        logger.info("移除群成员: sessionId={}, operatorId={}, targetUserId={}", sessionId, operatorId, targetUserId);
+    }
+
+    /**
+     * 退群
+     */
+    @Transactional
+    public void leaveGroup(Long sessionId, Long userId) {
+        ChatSession session = sessionMapper.selectById(sessionId);
+        if (session == null) {
+            throw new BusinessException("群聊不存在");
+        }
+
+        if (!SessionConstants.SESSION_TYPE_GROUP.equals(session.getType())) {
+            throw new BusinessException("只有群聊才能退群");
+        }
+
+        if (!memberMapper.exists(sessionId, userId)) {
+            throw new BusinessException("您不在该群聊中");
+        }
+
+        // 如果是群主，不能直接退群（需要解散或转让）
+        if (session.getOwnerId().equals(userId)) {
+            throw new BusinessException("群主不能退群，请先解散群聊或转让群主");
+        }
+
+        memberMapper.delete(sessionId, userId);
+        logger.info("用户退群: sessionId={}, userId={}", sessionId, userId);
+    }
+
+    /**
+     * 解散群聊（群主操作）
+     */
+    @Transactional
+    public void dissolveGroup(Long sessionId, Long userId) {
+        ChatSession session = sessionMapper.selectById(sessionId);
+        if (session == null) {
+            throw new BusinessException("群聊不存在");
+        }
+
+        if (!SessionConstants.SESSION_TYPE_GROUP.equals(session.getType())) {
+            throw new BusinessException("只有群聊才能解散");
+        }
+
+        // 只有群主可以解散
+        if (!session.getOwnerId().equals(userId)) {
+            throw new BusinessException("只有群主才能解散群聊");
+        }
+
+        // 删除群成员、消息和群
+        memberMapper.deleteBySessionId(sessionId);
+        messageMapper.deleteBySessionId(sessionId);
+        sessionMapper.deleteById(sessionId);
+
+        logger.info("解散群聊: sessionId={}, userId={}", sessionId, userId);
+    }
+
+    /**
+     * 转让群主
+     */
+    @Transactional
+    public void transferOwner(Long sessionId, Long currentOwnerId, Long newOwnerId) {
+        ChatSession session = sessionMapper.selectById(sessionId);
+        if (session == null) {
+            throw new BusinessException("群聊不存在");
+        }
+
+        if (!SessionConstants.SESSION_TYPE_GROUP.equals(session.getType())) {
+            throw new BusinessException("只有群聊才能转让群主");
+        }
+
+        // 只有群主可以转让
+        if (!session.getOwnerId().equals(currentOwnerId)) {
+            throw new BusinessException("只有群主才能转让群主");
+        }
+
+        // 检查新群主是否是群成员
+        if (!memberMapper.exists(sessionId, newOwnerId)) {
+            throw new BusinessException("新群主必须是群成员");
+        }
+
+        sessionMapper.updateOwner(sessionId, newOwnerId);
+        logger.info("转让群主: sessionId={}, oldOwnerId={}, newOwnerId={}", sessionId, currentOwnerId, newOwnerId);
+    }
+
+    /**
+     * 更新群信息（群主操作）
+     */
+    @Transactional
+    public void updateGroupInfo(Long sessionId, Long userId, String groupName, String notice) {
+        ChatSession session = sessionMapper.selectById(sessionId);
+        if (session == null) {
+            throw new BusinessException("群聊不存在");
+        }
+
+        if (!SessionConstants.SESSION_TYPE_GROUP.equals(session.getType())) {
+            throw new BusinessException("只有群聊才能修改群信息");
+        }
+
+        // 只有群主可以修改
+        if (!session.getOwnerId().equals(userId)) {
+            throw new BusinessException("只有群主才能修改群信息");
+        }
+
+        sessionMapper.updateGroupInfo(sessionId, groupName.trim(), notice);
+        logger.info("更新群信息: sessionId={}, groupName={}", sessionId, groupName);
+    }
+
+    /**
+     * 获取群信息
+     */
+    public ChatSession getGroupInfo(Long sessionId) {
+        return sessionMapper.selectById(sessionId);
+    }
+
+    /**
+     * 判断用户是否是群主
+     */
+    public boolean isGroupOwner(Long sessionId, Long userId) {
+        ChatSession session = sessionMapper.selectById(sessionId);
+        if (session == null) {
+            return false;
+        }
+        return session.getOwnerId() != null && session.getOwnerId().equals(userId);
+    }
+
 }

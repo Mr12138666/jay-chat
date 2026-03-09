@@ -7,6 +7,7 @@ import org.apache.ibatis.annotations.Mapper;
 import org.apache.ibatis.annotations.Options;
 import org.apache.ibatis.annotations.Param;
 import org.apache.ibatis.annotations.Select;
+import org.apache.ibatis.annotations.Update;
 
 import java.util.List;
 
@@ -16,29 +17,29 @@ import java.util.List;
 @Mapper
 public interface ChatSessionMapper {
 
-    @Insert("INSERT INTO chat_session (type, name, owner_id, created_at) " +
-            "VALUES (#{type}, #{name}, #{ownerId}, NOW())")
+    @Insert("INSERT INTO chat_session (type, name, owner_id, notice, created_at) " +
+            "VALUES (#{type}, #{name}, #{ownerId}, #{notice}, NOW())")
     @Options(useGeneratedKeys = true, keyProperty = "id")
     int insert(ChatSession session);
 
-    @Select("SELECT id, type, name, owner_id as ownerId, created_at as createdAt " +
+    @Select("SELECT id, type, name, owner_id as ownerId, notice, created_at as createdAt " +
             "FROM chat_session WHERE id = #{id}")
     ChatSession selectById(Long id);
 
-    @Select("SELECT cs.id, cs.type, cs.name, cs.owner_id as ownerId, cs.created_at as createdAt " +
+    @Select("SELECT cs.id, cs.type, cs.name, cs.owner_id as ownerId, cs.notice, cs.created_at as createdAt " +
             "FROM chat_session cs " +
             "INNER JOIN chat_session_member csm ON cs.id = csm.session_id " +
             "WHERE csm.user_id = #{userId} ORDER BY cs.created_at DESC")
     List<ChatSession> selectByUserId(Long userId);
 
-    @Select("SELECT id, type, name, owner_id as ownerId, created_at as createdAt " +
+    @Select("SELECT id, type, name, owner_id as ownerId, notice, created_at as createdAt " +
             "FROM chat_session " +
             "WHERE type = 'group' AND name = #{name} " +
             "ORDER BY created_at ASC " +
             "LIMIT 1")
     ChatSession selectByName(@Param("name") String name);
-    
-    @Select("SELECT id, type, name, owner_id as ownerId, created_at as createdAt " +
+
+    @Select("SELECT id, type, name, owner_id as ownerId, notice, created_at as createdAt " +
             "FROM chat_session " +
             "WHERE type = 'group' AND name = #{name} " +
             "ORDER BY created_at ASC")
@@ -47,7 +48,7 @@ public interface ChatSessionMapper {
     /**
      * 查询两个用户之间的私人会话
      */
-    @Select("SELECT cs.id, cs.type, cs.name, cs.owner_id as ownerId, cs.created_at as createdAt " +
+    @Select("SELECT cs.id, cs.type, cs.name, cs.owner_id as ownerId, cs.notice, cs.created_at as createdAt " +
             "FROM chat_session cs " +
             "INNER JOIN chat_session_member csm1 ON cs.id = csm1.session_id " +
             "INNER JOIN chat_session_member csm2 ON cs.id = csm2.session_id " +
@@ -59,4 +60,16 @@ public interface ChatSessionMapper {
 
     @Delete("DELETE FROM chat_session WHERE id = #{id}")
     int deleteById(Long id);
+
+    /**
+     * 更新群信息（名称和公告）
+     */
+    @Update("UPDATE chat_session SET name = #{name}, notice = #{notice} WHERE id = #{id}")
+    int updateGroupInfo(@Param("id") Long id, @Param("name") String name, @Param("notice") String notice);
+
+    /**
+     * 转让群主
+     */
+    @Update("UPDATE chat_session SET owner_id = #{newOwnerId} WHERE id = #{sessionId}")
+    int updateOwner(@Param("sessionId") Long sessionId, @Param("newOwnerId") Long newOwnerId);
 }
