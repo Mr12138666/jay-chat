@@ -1,6 +1,7 @@
 package com.sunrisejay.jaychat.mapper;
 
 import com.sunrisejay.jaychat.entity.ChatSession;
+import org.apache.ibatis.annotations.Delete;
 import org.apache.ibatis.annotations.Insert;
 import org.apache.ibatis.annotations.Mapper;
 import org.apache.ibatis.annotations.Options;
@@ -50,9 +51,12 @@ public interface ChatSessionMapper {
             "FROM chat_session cs " +
             "INNER JOIN chat_session_member csm1 ON cs.id = csm1.session_id " +
             "INNER JOIN chat_session_member csm2 ON cs.id = csm2.session_id " +
-            "WHERE cs.type = 'single' " +
+            "WHERE cs.type = 'private' " +
             "AND csm1.user_id = #{userId1} " +
             "AND csm2.user_id = #{userId2} " +
             "LIMIT 1")
     ChatSession selectSingleSessionBetweenUsers(@Param("userId1") Long userId1, @Param("userId2") Long userId2);
+
+    @Delete("DELETE FROM chat_session WHERE id = #{id}")
+    int deleteById(Long id);
 }

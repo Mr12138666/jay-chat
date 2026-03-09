@@ -325,4 +325,34 @@ public class ChatService {
         return null;
     }
 
+    /**
+     * 删除会话（退出会话）
+     * 如果是群聊，则从群聊中移除用户；如果是私人会话，则删除整个会话
+     */
+    @Transactional
+    public void deleteSession(Long sessionId, Long userId) {
+        ChatSession session = sessionMapper.selectById(sessionId);
+        if (session == null) {
+            throw new BusinessException("会话不存在");
+        }
+
+        if (SessionConstants.SESSION_TYPE_PRIVATE.equals(session.getType())) {
+            // 私人会话：删除整个会话
+            // 先删除会话成员关系
+            memberMapper.deleteBySessionId(sessionId);
+            // 再删除会话中的消息
+            messageMapper.deleteBySessionId(sessionId);
+            // 最后删除会话
+            sessionMapper.deleteById(sessionId);
+            logger.info("删除私人会话: sessionId={}", sessionId);
+        } else {
+            // 群聊：只移除用户
+            if (!memberMapper.exists(sessionId, userId)) {
+                throw new BusinessException("您不在该群聊中");
+            }
+            memberMapper.delete(sessionId, userId);
+            logger.info("退出群聊: sessionId={}, userId={}", sessionId, userId);
+        }
+    }
+
 }

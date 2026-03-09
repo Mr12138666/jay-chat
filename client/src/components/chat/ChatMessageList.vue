@@ -81,21 +81,21 @@ const emit = defineEmits<{
   align-items: center;
   justify-content: center;
   height: 100%;
-  color: #666;
-  font-size: 14px;
+  color: var(--text-light);
+  font-size: 15px;
 }
 
 .messages-list {
   display: flex;
   flex-direction: column;
-  gap: 16px;
+  gap: 18px;
   min-height: min-content;
 }
 
 .message {
   display: flex;
   flex-direction: row;
-  gap: 12px;
+  gap: 14px;
   max-width: 70%;
   min-width: 0;
   width: fit-content;
@@ -126,7 +126,7 @@ const emit = defineEmits<{
 .message-body {
   display: flex;
   flex-direction: column;
-  gap: 4px;
+  gap: 6px;
   flex: 1;
   min-width: 0;
   justify-content: flex-start;
@@ -140,16 +140,22 @@ const emit = defineEmits<{
 }
 
 .message-avatar {
-  width: 40px;
-  height: 40px;
-  border-radius: 50%;
+  width: 44px;
+  height: 44px;
+  border-radius: var(--radius-md);
   flex-shrink: 0;
   cursor: pointer;
   overflow: hidden;
-  background: #333;
+  background: linear-gradient(135deg, #ff6b9d 0%, #ff9f43 100%);
   display: flex;
   align-items: center;
   justify-content: center;
+  box-shadow: 0 4px 12px rgba(255, 107, 157, 0.3);
+  transition: transform 0.2s;
+}
+
+.message-avatar:hover {
+  transform: scale(1.08);
 }
 
 .avatar-img {
@@ -164,7 +170,7 @@ const emit = defineEmits<{
   display: flex;
   align-items: center;
   justify-content: center;
-  background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
+  background: linear-gradient(135deg, #4ecdc4, #44a08d);
   color: white;
   font-weight: 600;
   font-size: 16px;
@@ -172,20 +178,20 @@ const emit = defineEmits<{
 
 .message-meta {
   display: flex;
-  gap: 8px;
+  gap: 10px;
   align-items: center;
 }
 
 .reply-btn {
   background: none;
   border: none;
-  color: #666;
+  color: var(--text-light);
   cursor: pointer;
   font-size: 14px;
-  padding: 2px 6px;
-  border-radius: 4px;
+  padding: 4px 8px;
+  border-radius: var(--radius-sm);
   opacity: 0;
-  transition: opacity 0.2s;
+  transition: all 0.2s;
 }
 
 .message:hover .reply-btn {
@@ -193,15 +199,15 @@ const emit = defineEmits<{
 }
 
 .reply-btn:hover {
-  color: #667eea;
-  background: rgba(102, 126, 234, 0.1);
+  color: #ff6b9d;
+  background: rgba(255, 107, 157, 0.1);
 }
 
 .reply-quote {
-  padding: 6px 10px;
-  background: rgba(0, 0, 0, 0.2);
-  border-left: 2px solid #667eea;
-  border-radius: 4px;
+  padding: 8px 12px;
+  background: rgba(255, 107, 157, 0.08);
+  border-left: 3px solid #ff6b9d;
+  border-radius: var(--radius-sm);
   margin-bottom: 4px;
   display: flex;
   flex-direction: column;
@@ -209,12 +215,13 @@ const emit = defineEmits<{
 }
 
 .reply-quote-label {
-  color: #667eea;
+  color: #ff6b9d;
   font-size: 11px;
+  font-weight: 500;
 }
 
 .reply-quote-content {
-  color: #999;
+  color: var(--text-secondary);
   font-size: 12px;
   overflow: hidden;
   text-overflow: ellipsis;
@@ -222,73 +229,69 @@ const emit = defineEmits<{
 }
 
 .sender {
-  font-weight: 500;
-  color: #667eea;
+  font-weight: 600;
+  color: #ff6b9d;
   font-size: 14px;
 }
 
 .time {
   font-size: 12px;
-  color: #666;
+  color: var(--text-light);
 }
 
 .message-content {
-  padding: 10px 14px;
-  background: #2a2a2a;
-  border-radius: 12px;
+  padding: 12px 16px;
+  background: rgba(255, 255, 255, 0.9);
+  backdrop-filter: blur(10px);
+  border-radius: var(--radius-lg);
   font-size: 14px;
   line-height: 1.5;
   word-wrap: break-word;
   word-break: break-word;
-  box-shadow: 0 2px 4px rgba(0, 0, 0, 0.15);
+  box-shadow: 0 2px 12px rgba(0, 0, 0, 0.08);
   display: inline-block;
   max-width: 100%;
   width: fit-content;
   min-width: 0;
   white-space: pre-wrap;
-  overflow: hidden; /* 防止内容溢出 */
-  box-sizing: border-box; /* 确保padding计算正确 */
+  overflow: hidden;
+  box-sizing: border-box;
+  border: 1px solid rgba(0, 0, 0, 0.05);
 }
 
-/* 图片消息的特殊样式 - 图片居中显示，消息框有边框和padding */
+/* 图片消息的特殊样式 */
 .message-content.image-content {
-  padding: 8px;
+  padding: 10px;
   display: flex;
   align-items: center;
   justify-content: center;
   width: fit-content;
   max-width: 100%;
-  border: 1px solid rgba(255, 255, 255, 0.15);
-  background: #1a1a1a !important;
-  box-shadow: 0 2px 8px rgba(0, 0, 0, 0.2);
+  background: rgba(255, 255, 255, 0.95) !important;
+  border: 1px solid rgba(255, 107, 157, 0.2);
 }
 
-/* 自己发送的图片消息边框颜色 */
-.message.own-message .message-content.image-content {
-  border: 1px solid rgba(255, 255, 255, 0.2);
-  background: rgba(102, 126, 234, 0.1) !important;
-}
-
+/* 自己发送的消息气泡 - 粉橙渐变 */
 .message.own-message .message-content {
-  background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
+  background: linear-gradient(135deg, #ff6b9d 0%, #ff9f43 100%);
   color: white;
-  border-bottom-right-radius: 4px;
+  border-bottom-right-radius: 6px;
+  border: none;
 }
 
 .message:not(.own-message) .message-content {
-  border-bottom-left-radius: 4px;
+  border-bottom-left-radius: 6px;
 }
 
 .message-image {
-  max-width: calc(100% - 0px); /* 减去父容器的padding */
+  max-width: calc(100% - 0px);
   max-height: 400px;
   width: auto;
   height: auto;
-  border-radius: 6px;
+  border-radius: var(--radius-md);
   cursor: pointer;
   display: block;
   object-fit: contain;
-  /* 确保图片不会超出消息框 */
   box-sizing: border-box;
   margin: 0;
 }

@@ -1,5 +1,6 @@
 package com.sunrisejay.jaychat.common.converter;
 
+
 import com.sunrisejay.jaychat.dto.response.UserDetailResponse;
 import com.sunrisejay.jaychat.entity.User;
 import org.springframework.stereotype.Component;

@@ -87,10 +87,24 @@ const handleRegister = async () => {
 
 <template>
   <div class="login-container">
-    <div class="login-box">
+    <!-- 背景装饰 -->
+    <div class="bg-decoration">
+      <div class="floating-shape shape-1"></div>
+      <div class="floating-shape shape-2"></div>
+      <div class="floating-shape shape-3"></div>
+      <div class="floating-shape shape-4"></div>
+      <div class="glow-orb orb-1"></div>
+      <div class="glow-orb orb-2"></div>
+      <div class="glow-orb orb-3"></div>
+    </div>
+
+    <div class="login-box glass-card">
       <div class="login-header">
+        <div class="logo-container">
+          <span class="logo-emoji">💬</span>
+        </div>
         <h1>jay-chat</h1>
-        <p>大型聊天室</p>
+        <p>和朋友们一起聊天吧</p>
       </div>
 
       <div v-if="errorMsg" class="error-message">
@@ -105,6 +119,7 @@ const handleRegister = async () => {
             v-model="loginForm.username"
             type="text"
             placeholder="请输入用户名"
+            class="input-glass"
             :disabled="loading"
           />
         </div>
@@ -114,11 +129,12 @@ const handleRegister = async () => {
             v-model="loginForm.password"
             type="password"
             placeholder="请输入密码"
+            class="input-glass"
             :disabled="loading"
           />
         </div>
-        <button type="submit" :disabled="loading" class="submit-btn">
-          {{ loading ? '登录中...' : '登录' }}
+        <button type="submit" :disabled="loading" class="submit-btn gradient-btn">
+          {{ loading ? '登录中...' : '登 录' }}
         </button>
         <p class="toggle-text">
           还没有账号？
@@ -134,6 +150,7 @@ const handleRegister = async () => {
             v-model="registerForm.username"
             type="text"
             placeholder="请输入用户名（用于登录）"
+            class="input-glass"
             :disabled="loading"
           />
         </div>
@@ -143,6 +160,7 @@ const handleRegister = async () => {
             v-model="registerForm.nickname"
             type="text"
             placeholder="请输入昵称（显示名称）"
+            class="input-glass"
             :disabled="loading"
           />
         </div>
@@ -152,11 +170,12 @@ const handleRegister = async () => {
             v-model="registerForm.password"
             type="password"
             placeholder="请输入密码"
+            class="input-glass"
             :disabled="loading"
           />
         </div>
-        <button type="submit" :disabled="loading" class="submit-btn">
-          {{ loading ? '注册中...' : '注册' }}
+        <button type="submit" :disabled="loading" class="submit-btn gradient-btn">
+          {{ loading ? '注册中...' : '注 册' }}
         </button>
         <p class="toggle-text">
           已有账号？
@@ -176,91 +195,129 @@ const handleRegister = async () => {
   bottom: 0;
   width: 100vw;
   height: 100vh;
-  min-height: 100vh;
   display: flex;
   align-items: center;
   justify-content: center;
-  background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
+  /* 柔和的粉红到薄荷绿渐变 */
+  background: linear-gradient(135deg, #fff5f5 0%, #f0fffe 50%, #fff9f0 100%);
   padding: 20px;
   box-sizing: border-box;
   margin: 0;
-  overflow: auto;
+  overflow: hidden;
+}
+
+/* 背景装饰 */
+.bg-decoration {
+  position: absolute;
+  top: 0;
+  left: 0;
+  right: 0;
+  bottom: 0;
+  overflow: hidden;
+  pointer-events: none;
+}
+
+.floating-shape {
+  position: absolute;
+  border-radius: 50%;
+  opacity: 0.6;
+  animation: float 6s ease-in-out infinite;
+}
+
+.shape-1 {
+  width: 200px;
+  height: 200px;
+  background: linear-gradient(135deg, rgba(255, 107, 157, 0.3), rgba(255, 159, 67, 0.3));
+  top: 10%;
+  left: 10%;
+  animation-delay: 0s;
+}
+
+.shape-2 {
+  width: 150px;
+  height: 150px;
+  background: linear-gradient(135deg, rgba(78, 205, 196, 0.3), rgba(0, 210, 211, 0.3));
+  top: 60%;
+  right: 15%;
+  animation-delay: 1s;
+}
+
+.shape-3 {
+  width: 100px;
+  height: 100px;
+  background: linear-gradient(135deg, rgba(102, 126, 234, 0.3), rgba(224, 195, 252, 0.3));
+  bottom: 20%;
+  left: 20%;
+  animation-delay: 2s;
+}
+
+.shape-4 {
+  width: 80px;
+  height: 80px;
+  background: linear-gradient(135deg, rgba(255, 159, 67, 0.3), rgba(255, 107, 157, 0.3));
+  top: 30%;
+  right: 25%;
+  animation-delay: 3s;
+}
+
+.glow-orb {
+  position: absolute;
+  border-radius: 50%;
+  filter: blur(60px);
+  animation: pulse 4s ease-in-out infinite;
+}
+
+.orb-1 {
+  width: 300px;
+  height: 300px;
+  background: rgba(255, 107, 157, 0.2);
+  top: -100px;
+  left: -100px;
+}
+
+.orb-2 {
+  width: 250px;
+  height: 250px;
+  background: rgba(78, 205, 196, 0.2);
+  bottom: -80px;
+  right: -80px;
+  animation-delay: 1s;
+}
+
+.orb-3 {
+  width: 200px;
+  height: 200px;
+  background: rgba(102, 126, 234, 0.15);
+  top: 50%;
+  left: 50%;
+  transform: translate(-50%, -50%);
+  animation-delay: 2s;
+}
+
+/* 登录卡片 */
+.login-box {
+  position: relative;
+  z-index: 1;
+  background: rgba(255, 255, 255, 0.75);
+  backdrop-filter: blur(20px);
+  -webkit-backdrop-filter: blur(20px);
+  border: 1px solid rgba(255, 255, 255, 0.8);
+  border-radius: var(--radius-xl);
+  padding: 40px;
+  width: 100%;
+  max-width: 420px;
+  box-shadow: 0 8px 32px rgba(31, 38, 135, 0.1);
 }
 
 /* 移动端优化 */
 @media (max-width: 480px) {
-  .login-container {
-    padding: 16px;
-  }
-  
   .login-box {
     padding: 30px 24px;
-    border-radius: 8px;
+    border-radius: var(--radius-lg);
   }
-  
+
   .login-header h1 {
     font-size: 28px;
-  }
-  
-  .form-group input {
-    padding: 10px;
-    font-size: 16; /* 防止iOS自动缩放 */
-  }
-}
-
-.login-box {
-  background: white;
-  border-radius: 12px;
-  padding: 40px;
-  width: 100%;
-  max-width: 450px;
-  box-shadow: 0 10px 40px rgba(0, 0, 0, 0.1);
-  box-sizing: border-box;
-}
-
-/* PC端优化 - 从768px开始 */
-@media (min-width: 768px) {
-  .login-box {
-    max-width: 500px !important;
-    padding: 50px !important;
-  }
-  
-  .login-header h1 {
-    font-size: 36px !important;
-  }
-  
-  .form-group input {
-    padding: 14px !important;
-    font-size: 15px !important;
-  }
-  
-  .submit-btn {
-    padding: 14px !important;
-    font-size: 16px !important;
-  }
-}
-
-/* 中等PC端 */
-@media (min-width: 1024px) {
-  .login-box {
-    max-width: 550px !important;
-    padding: 55px !important;
-  }
-}
-
-/* 大屏PC端 */
-@media (min-width: 1200px) {
-  .login-box {
-    max-width: 600px !important;
-    padding: 60px !important;
-  }
-}
-
-/* 超大屏PC端 */
-@media (min-width: 1440px) {
-  .login-box {
-    max-width: 650px !important;
-    padding: 65px !important;
   }
 }
 
@@ -269,31 +326,52 @@ const handleRegister = async () => {
   margin-bottom: 30px;
 }
 
+.logo-container {
+  width: 80px;
+  height: 80px;
+  margin: 0 auto 16px;
+  background: linear-gradient(135deg, #ff6b9d 0%, #ff9f43 100%);
+  border-radius: var(--radius-lg);
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  box-shadow: 0 8px 24px rgba(255, 107, 157, 0.3);
+}
+
+.logo-emoji {
+  font-size: 40px;
+}
+
 .login-header h1 {
   font-size: 32px;
-  color: #333;
+  background: linear-gradient(135deg, #ff6b9d, #ff9f43, #4ecdc4);
+  -webkit-background-clip: text;
+  -webkit-text-fill-color: transparent;
+  background-clip: text;
   margin: 0 0 8px 0;
+  font-weight: 700;
 }
 
 .login-header p {
-  color: #666;
+  color: var(--text-secondary);
   font-size: 14px;
   margin: 0;
 }
 
 .error-message {
-  background: #fee;
-  color: #c33;
-  padding: 12px;
-  border-radius: 6px;
+  background: linear-gradient(135deg, rgba(255, 107, 157, 0.1), rgba(255, 159, 67, 0.1));
+  color: #e84393;
+  padding: 12px 16px;
+  border-radius: var(--radius-md);
   margin-bottom: 20px;
   font-size: 14px;
+  border: 1px solid rgba(255, 107, 157, 0.2);
 }
 
 .login-form {
   display: flex;
   flex-direction: column;
-  gap: 20px;
+  gap: 18px;
 }
 
 .form-group {
@@ -304,63 +382,56 @@ const handleRegister = async () => {
 
 .form-group label {
   font-size: 14px;
-  color: #333;
+  color: var(--text-primary);
   font-weight: 500;
 }
 
 .form-group input {
-  padding: 12px;
-  border: 1px solid #ddd;
-  border-radius: 6px;
+  padding: 14px 16px;
+  border: 2px solid transparent;
+  border-radius: var(--radius-md);
   font-size: 14px;
-  transition: border-color 0.2s;
+  transition: all 0.3s ease;
+  background: rgba(255, 255, 255, 0.8);
+  background-image: linear-gradient(#fff, #fff), linear-gradient(135deg, #ff6b9d, #4ecdc4);
+  background-origin: border-box;
+  background-clip: padding-box, border-box;
 }
 
 .form-group input:focus {
   outline: none;
-  border-color: #667eea;
+  box-shadow: 0 0 20px rgba(255, 107, 157, 0.2);
 }
 
 .form-group input:disabled {
-  background: #f5f5f5;
+  background: var(--bg-tertiary);
   cursor: not-allowed;
+}
+
+.form-group input::placeholder {
+  color: var(--text-light);
 }
 
 .submit-btn {
-  padding: 12px;
-  background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
-  color: white;
-  border: none;
-  border-radius: 6px;
+  padding: 14px;
   font-size: 16px;
-  font-weight: 500;
-  cursor: pointer;
-  transition: opacity 0.2s;
-}
-
-.submit-btn:hover:not(:disabled) {
-  opacity: 0.9;
-}
-
-.submit-btn:disabled {
-  opacity: 0.6;
-  cursor: not-allowed;
+  font-weight: 600;
+  margin-top: 8px;
 }
 
 .toggle-text {
   text-align: center;
   font-size: 14px;
-  color: #666;
+  color: var(--text-secondary);
   margin: 0;
 }
 
 .toggle-text a {
-  color: #667eea;
-  text-decoration: none;
-  font-weight: 500;
+  color: #ff6b9d;
+  font-weight: 600;
 }
 
 .toggle-text a:hover {
-  text-decoration: underline;
+  color: #ff9f43;
 }
 </style>

@@ -12,6 +12,7 @@ import {
   getUsers,
   createPrivateSession,
   getPrivateSessionOtherMember,
+  deleteSession,
   type ChatSession,
   type SessionMember,
   type SessionMemberStats,
@@ -148,8 +149,19 @@ const loadSessions = async () => {
     console.log('默认会话（公共聊天室）:', defaultSession)
     
     // 然后获取用户的所有会话列表
-    sessions.value = await getSessions()
-    console.log('获取到的会话列表:', sessions.value)
+    const rawSessions = await getSessions()
+
+    // 去重：以session id为key，只保留每个id的第一个会话
+    const seen = new Set<number>()
+    sessions.value = rawSessions.filter(session => {
+      if (seen.has(session.id)) {
+        console.warn('发现重复会话，已过滤:', session.id)
+        return false
+      }
+      seen.add(session.id)
+      return true
+    })
+    console.log('获取到的会话列表（去重后）:', sessions.value)
 
     // 为每个私人会话获取对方信息
     for (const session of sessions.value) {
@@ -324,6 +336,42 @@ const switchSession = async (sessionId: number) => {
   // 加载新会话的成员统计
   await loadMembersData()
   startMemberStatsRefresh()
+}
+
+// 删除当前会话
+const handleDeleteSession = async (sessionId: number, event: Event) => {
+  event.stopPropagation()
+
+  const session = sessions.value.find(s => s.id === sessionId)
+  if (!session) return
+
+  const confirmMessage = session.type === 'private'
+    ? '确定要删除与该联系人的聊天吗？'
+    : '确定要退出会话吗？'
+
+  if (!confirm(confirmMessage)) return
+
+  try {
+    await deleteSession(sessionId)
+    showSuccess('会话已删除')
+
+    // 如果删除的是当前会话，切换到第一个可用会话
+    if (currentSessionId.value === sessionId) {
+      const remainingSessions = sessions.value.filter(s => s.id !== sessionId)
+      if (remainingSessions.length > 0) {
+        await switchSession(remainingSessions[0].id)
+      } else {
+        currentSessionId.value = null
+        messages.value = []
+      }
+    }
+
+    // 刷新会话列表
+    await loadSessions()
+  } catch (error: any) {
+    console.error('删除会话失败:', error)
+    showError(handleApiError(error))
+  }
 }
 
 const toggleSidebar = () => {
@@ -741,10 +789,17 @@ onUnmounted(() => {
               <span class="session-icon">
                 {{ session.type === 'private' ? '👤' : '👥' }}
               </span>
-              {{ getSessionDisplayName(session) }}
+              <span class="session-name">{{ getSessionDisplayName(session) }}</span>
               <span v-if="getUnreadCount(session.id) > 0" class="unread-badge">
                 {{ getUnreadCount(session.id) > 99 ? '99+' : getUnreadCount(session.id) }}
               </span>
+              <button
+                class="delete-session-btn"
+                @click="handleDeleteSession(session.id, $event)"
+                title="删除会话"
+              >
+                ×
+              </button>
             </li>
           </ul>
           <p v-else class="empty-sessions">暂无会话</p>
@@ -1009,13 +1064,37 @@ onUnmounted(() => {
 </template>
 
 <style scoped>
+/* 主容器 - 明亮主题 */
 .app {
   display: flex;
   height: 100vh;
-  background: #1a1a1a;
-  color: #e0e0e0;
+  width: 100%;
+  /* 柔和的粉彩渐变背景 */
+  background: linear-gradient(135deg, #fff5f5 0%, #f0fffe 30%, #fff9f0 60%, #f5f0ff 100%);
+  color: var(--text-primary);
   position: relative;
   overflow: hidden;
+}
+
+/* 背景装饰 */
+.app::before {
+  content: '';
+  position: absolute;
+  top: -50%;
+  left: -50%;
+  width: 200%;
+  height: 200%;
+  background:
+    radial-gradient(circle at 20% 80%, rgba(255, 107, 157, 0.1) 0%, transparent 50%),
+    radial-gradient(circle at 80% 20%, rgba(78, 205, 196, 0.1) 0%, transparent 50%),
+    radial-gradient(circle at 40% 40%, rgba(102, 126, 234, 0.08) 0%, transparent 40%);
+  pointer-events: none;
+  animation: bgFloat 20s ease-in-out infinite;
+}
+
+@keyframes bgFloat {
+  0%, 100% { transform: translate(0, 0); }
+  50% { transform: translate(-2%, -2%); }
 }
 
 /* 移动端菜单按钮 */
@@ -1025,25 +1104,28 @@ onUnmounted(() => {
   top: 16px;
   left: 16px;
   z-index: 1001;
-  width: 40px;
-  height: 40px;
-  border-radius: 8px;
-  background: #252525;
-  border: 1px solid #333;
-  color: #e0e0e0;
+  width: 44px;
+  height: 44px;
+  border-radius: var(--radius-md);
+  background: rgba(255, 255, 255, 0.9);
+  backdrop-filter: blur(10px);
+  border: 1px solid rgba(255, 255, 255, 0.5);
+  color: var(--text-primary);
   cursor: pointer;
   align-items: center;
   justify-content: center;
   transition: all 0.3s;
+  box-shadow: var(--shadow-md);
 }
 
 .mobile-menu-btn:hover {
-  background: #2a2a2a;
+  transform: scale(1.05);
+  box-shadow: var(--shadow-lg);
 }
 
 .mobile-menu-btn svg {
-  width: 20px;
-  height: 20px;
+  width: 22px;
+  height: 22px;
 }
 
 /* 移动端遮罩层 */
@@ -1054,52 +1136,62 @@ onUnmounted(() => {
   left: 0;
   right: 0;
   bottom: 0;
-  background: rgba(0, 0, 0, 0.5);
+  background: rgba(255, 255, 255, 0.8);
+  backdrop-filter: blur(4px);
   z-index: 999;
-  backdrop-filter: blur(2px);
 }
 
+/* 侧边栏 - 毛玻璃效果 */
 .sidebar {
-  width: 280px;
-  background: #252525;
-  border-right: 1px solid #333;
+  width: 300px;
+  min-width: 300px;
+  background: rgba(255, 255, 255, 0.7);
+  backdrop-filter: blur(20px);
+  -webkit-backdrop-filter: blur(20px);
+  border-right: 1px solid rgba(255, 255, 255, 0.5);
   display: flex;
   flex-direction: column;
   transition: transform 0.3s ease;
   z-index: 1000;
   position: relative;
+  box-shadow: 4px 0 24px rgba(0, 0, 0, 0.05);
 }
 
 .sidebar-header {
-  padding: 20px;
-  border-bottom: 1px solid #333;
+  padding: 24px 20px;
+  border-bottom: 1px solid rgba(0, 0, 0, 0.05);
 }
 
 .sidebar-header h1 {
   margin: 0 0 4px 0;
-  font-size: 24px;
-  color: #fff;
+  font-size: 26px;
+  background: linear-gradient(135deg, #ff6b9d, #ff9f43);
+  -webkit-background-clip: text;
+  -webkit-text-fill-color: transparent;
+  background-clip: text;
+  font-weight: 700;
 }
 
 .subtitle {
   margin: 0;
-  font-size: 12px;
-  color: #999;
+  font-size: 13px;
+  color: var(--text-secondary);
 }
 
+/* 用户信息区域 */
 .user-info {
-  padding: 16px 20px;
-  border-bottom: 1px solid #333;
+  padding: 20px;
+  border-bottom: 1px solid rgba(0, 0, 0, 0.05);
   display: flex;
   align-items: center;
-  gap: 12px;
+  gap: 14px;
 }
 
 .user-avatar {
-  width: 40px;
-  height: 40px;
-  border-radius: 50%;
-  background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
+  width: 48px;
+  height: 48px;
+  border-radius: var(--radius-md);
+  background: linear-gradient(135deg, #ff6b9d 0%, #ff9f43 100%);
   display: flex;
   align-items: center;
   justify-content: center;
@@ -1107,12 +1199,13 @@ onUnmounted(() => {
   color: white;
   flex-shrink: 0;
   cursor: pointer;
-  transition: transform 0.2s;
+  transition: all 0.3s;
   overflow: hidden;
+  box-shadow: 0 4px 12px rgba(255, 107, 157, 0.3);
 }
 
 .user-avatar:hover {
-  transform: scale(1.05);
+  transform: scale(1.08);
 }
 
 .user-avatar .avatar-img {
@@ -1141,9 +1234,9 @@ onUnmounted(() => {
 }
 
 .user-name {
-  font-size: 14px;
-  font-weight: 500;
-  color: #fff;
+  font-size: 15px;
+  font-weight: 600;
+  color: var(--text-primary);
   white-space: nowrap;
   overflow: hidden;
   text-overflow: ellipsis;
@@ -1151,24 +1244,24 @@ onUnmounted(() => {
 }
 
 .edit-nickname-btn {
-  width: 20px;
-  height: 20px;
+  width: 22px;
+  height: 22px;
   padding: 0;
   background: transparent;
   border: none;
-  color: #999;
+  color: var(--text-light);
   cursor: pointer;
   display: flex;
   align-items: center;
   justify-content: center;
-  border-radius: 4px;
+  border-radius: var(--radius-sm);
   transition: all 0.2s;
   flex-shrink: 0;
 }
 
 .edit-nickname-btn:hover {
-  color: #667eea;
-  background: rgba(102, 126, 234, 0.1);
+  color: #ff6b9d;
+  background: rgba(255, 107, 157, 0.1);
 }
 
 .edit-nickname-btn svg {
@@ -1178,40 +1271,79 @@ onUnmounted(() => {
 
 .user-id {
   font-size: 12px;
-  color: #999;
+  color: var(--text-light);
   white-space: nowrap;
   overflow: hidden;
   text-overflow: ellipsis;
 }
 
 .logout-btn {
-  padding: 6px 12px;
-  background: #444;
-  color: #e0e0e0;
+  padding: 8px 14px;
+  background: rgba(255, 107, 157, 0.1);
+  color: #ff6b9d;
   border: none;
-  border-radius: 4px;
+  border-radius: var(--radius-md);
   font-size: 12px;
   cursor: pointer;
-  transition: background 0.2s;
+  transition: all 0.2s;
 }
 
 .logout-btn:hover {
-  background: #555;
+  background: rgba(255, 107, 157, 0.2);
 }
 
+/* 会话列表 */
 .room-list {
   flex: 1;
   overflow-y: auto;
   padding: 16px 0;
 }
 
+/* 标签页样式 */
+.tab-header {
+  display: flex;
+  padding: 0 16px 14px;
+  gap: 10px;
+}
+
+.tab-btn {
+  flex: 1;
+  padding: 12px 16px;
+  background: rgba(255, 255, 255, 0.6);
+  border: 2px solid transparent;
+  border-radius: var(--radius-md);
+  color: var(--text-secondary);
+  font-size: 14px;
+  font-weight: 500;
+  cursor: pointer;
+  transition: all 0.3s;
+}
+
+.tab-btn:hover {
+  background: rgba(255, 255, 255, 0.9);
+  color: #ff6b9d;
+}
+
+.tab-btn.active {
+  background: linear-gradient(135deg, #ff6b9d, #ff9f43);
+  color: white;
+  box-shadow: 0 4px 16px rgba(255, 107, 157, 0.3);
+}
+
+/* 会话图标 */
+.session-icon {
+  margin-right: 10px;
+  font-size: 18px;
+}
+
 .room-list h2 {
   padding: 0 20px 12px;
   margin: 0;
-  font-size: 14px;
-  color: #999;
+  font-size: 13px;
+  color: var(--text-light);
   text-transform: uppercase;
-  font-weight: 500;
+  font-weight: 600;
+  letter-spacing: 0.5px;
 }
 
 .room-list ul {
@@ -1221,66 +1353,77 @@ onUnmounted(() => {
 }
 
 .room-item {
-  padding: 12px 20px;
+  padding: 14px 20px;
   cursor: pointer;
-  transition: background 0.2s;
+  transition: all 0.2s;
+  border-left: 3px solid transparent;
+  margin: 2px 0;
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  font-size: 15px;
+  font-weight: 500;
+  color: var(--text-primary);
 }
 
 .room-item:hover {
-  background: #2a2a2a;
+  background: rgba(255, 255, 255, 0.6);
 }
 
 .room-item.active {
-  background: #333;
-  border-left: 3px solid #667eea;
+  background: linear-gradient(135deg, rgba(255, 107, 157, 0.15), rgba(255, 159, 67, 0.1));
+  border-left-color: #ff6b9d;
 }
 
-/* 标签页样式 */
-.tab-header {
-  display: flex;
-  padding: 0 20px 12px;
-  gap: 8px;
-}
-
-.tab-btn {
-  flex: 1;
-  padding: 8px 12px;
-  background: transparent;
-  border: 1px solid #333;
-  border-radius: 6px;
-  color: #999;
-  font-size: 13px;
-  cursor: pointer;
-  transition: all 0.2s;
-}
-
-.tab-btn:hover {
-  background: #2a2a2a;
-  color: #e0e0e0;
-}
-
-.tab-btn.active {
-  background: #667eea;
-  border-color: #667eea;
-  color: #fff;
-}
-
-/* 会话图标 */
-.session-icon {
-  margin-right: 8px;
-}
-
-/* 未读消息红点 */
+/* 未读消息徽章 */
 .unread-badge {
   margin-left: auto;
-  padding: 2px 6px;
-  background: #ff4d4f;
-  color: #fff;
+  padding: 3px 8px;
+  background: linear-gradient(135deg, #ff6b9d, #ff9f43);
+  color: white;
   font-size: 11px;
-  font-weight: 500;
-  border-radius: 10px;
-  min-width: 18px;
+  font-weight: 600;
+  border-radius: var(--radius-full);
+  min-width: 20px;
   text-align: center;
+  box-shadow: 0 2px 8px rgba(255, 107, 157, 0.3);
+}
+
+/* 会话名称 */
+.session-name {
+  flex: 1;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+/* 删除会话按钮 */
+.delete-session-btn {
+  opacity: 0;
+  width: 24px;
+  height: 24px;
+  padding: 0;
+  background: rgba(255, 107, 157, 0.1);
+  border: none;
+  border-radius: 8px;
+  color: #ff6b9d;
+  font-size: 16px;
+  font-weight: bold;
+  cursor: pointer;
+  transition: all 0.2s;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  flex-shrink: 0;
+}
+
+.room-item:hover .delete-session-btn {
+  opacity: 1;
+}
+
+.delete-session-btn:hover {
+  background: rgba(255, 107, 157, 0.2);
+  transform: scale(1.1);
 }
 
 /* 联系人搜索 */
@@ -1290,28 +1433,32 @@ onUnmounted(() => {
 
 .search-input {
   width: 100%;
-  padding: 8px 12px;
-  background: #1a1a1a;
-  border: 1px solid #333;
-  border-radius: 6px;
-  color: #e0e0e0;
-  font-size: 13px;
+  padding: 12px 16px;
+  background: rgba(255, 255, 255, 0.8);
+  border: 2px solid transparent;
+  border-radius: var(--radius-md);
+  color: var(--text-primary);
+  font-size: 14px;
   outline: none;
   box-sizing: border-box;
+  transition: all 0.3s;
+  background-image: linear-gradient(#fff, #fff), linear-gradient(135deg, #ff6b9d, #4ecdc4);
+  background-origin: border-box;
+  background-clip: padding-box, border-box;
 }
 
 .search-input:focus {
-  border-color: #667eea;
+  box-shadow: 0 0 20px rgba(255, 107, 157, 0.15);
 }
 
 .search-input::placeholder {
-  color: #666;
+  color: var(--text-light);
 }
 
 .loading-contacts {
   text-align: center;
   padding: 20px;
-  color: #666;
+  color: var(--text-light);
   font-size: 14px;
 }
 
@@ -1319,20 +1466,31 @@ onUnmounted(() => {
 .contact-item {
   display: flex;
   align-items: center;
-  padding: 12px 20px;
+  padding: 14px 20px;
   cursor: pointer;
-  transition: background 0.2s;
+  transition: all 0.2s;
 }
 
 .contact-item:hover {
-  background: #2a2a2a;
+  background: rgba(255, 255, 255, 0.6);
+}
+
+.contact-item .contact-name {
+  font-size: 15px;
+  font-weight: 600;
+  color: var(--text-primary);
+}
+
+.contact-item .contact-username {
+  font-size: 13px;
+  color: var(--text-light);
 }
 
 .contact-avatar {
-  width: 40px;
-  height: 40px;
-  border-radius: 50%;
-  background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
+  width: 44px;
+  height: 44px;
+  border-radius: var(--radius-md);
+  background: linear-gradient(135deg, #4ecdc4, #44a08d);
   display: flex;
   align-items: center;
   justify-content: center;
@@ -1340,7 +1498,8 @@ onUnmounted(() => {
   color: white;
   flex-shrink: 0;
   overflow: hidden;
-  margin-right: 12px;
+  margin-right: 14px;
+  box-shadow: 0 4px 12px rgba(78, 205, 196, 0.3);
 }
 
 .contact-avatar .avatar-img {
@@ -1364,8 +1523,8 @@ onUnmounted(() => {
 
 .contact-name {
   font-size: 14px;
-  font-weight: 500;
-  color: #fff;
+  font-weight: 600;
+  color: var(--text-primary);
   white-space: nowrap;
   overflow: hidden;
   text-overflow: ellipsis;
@@ -1373,35 +1532,39 @@ onUnmounted(() => {
 
 .contact-username {
   font-size: 12px;
-  color: #999;
+  color: var(--text-light);
   white-space: nowrap;
   overflow: hidden;
   text-overflow: ellipsis;
 }
 
 .empty-sessions {
-  padding: 20px;
+  padding: 30px 20px;
   text-align: center;
-  color: #666;
+  color: var(--text-light);
   font-size: 14px;
 }
 
+/* 聊天区域 */
 .chat {
   flex: 1;
   display: flex;
   flex-direction: column;
-  background: #1a1a1a;
+  background: rgba(255, 255, 255, 0.5);
+  backdrop-filter: blur(10px);
+  position: relative;
+  min-width: 0;
 }
 
+/* 聊天头部 */
 .chat-header {
-  padding: 16px 20px;
-  border-bottom: 1px solid #333;
-  background: #252525;
+  padding: 20px 24px;
+  border-bottom: 1px solid rgba(0, 0, 0, 0.05);
+  background: rgba(255, 255, 255, 0.8);
+  backdrop-filter: blur(20px);
   position: sticky;
   top: 0;
   z-index: 100;
-  backdrop-filter: blur(10px);
-  background: rgba(37, 37, 37, 0.95);
 }
 
 .chat-header-content {
@@ -1412,45 +1575,56 @@ onUnmounted(() => {
 
 .chat-header h2 {
   margin: 0;
-  font-size: 18px;
-  color: #fff;
+  font-size: 20px;
+  color: var(--text-primary);
   font-weight: 600;
 }
 
 .chat-subtitle {
   margin: 0;
-  font-size: 12px;
-  color: #999;
+  font-size: 13px;
+  color: var(--text-secondary);
   display: flex;
   align-items: center;
-  gap: 6px;
+  gap: 8px;
 }
 
 .status-dot {
   width: 8px;
   height: 8px;
   border-radius: 50%;
-  background: #666;
+  background: var(--text-light);
   display: inline-block;
-  transition: background 0.3s;
+  transition: all 0.3s;
 }
 
 .status-dot.connected {
-  background: #4ade80;
-  box-shadow: 0 0 8px rgba(74, 222, 128, 0.5);
+  background: #4ecdc4;
+  box-shadow: 0 0 8px rgba(78, 205, 196, 0.5);
 }
 
+/* 聊天消息区域 */
 .chat-messages {
   flex: 1;
   overflow-y: auto;
   overflow-x: hidden;
-  padding: 20px;
+  padding: 24px;
   display: flex;
   flex-direction: column;
   gap: 16px;
   scroll-behavior: smooth;
-  /* 优化滚动性能 */
   -webkit-overflow-scrolling: touch;
+}
+
+/* 响应式 */
+@media (min-width: 769px) {
+  .chat-messages {
+    padding: 28px;
+    max-width: 100%;
+    margin: 0 auto;
+    width: 100%;
+    box-sizing: border-box;
+  }
 }
 
 .loading, .empty-messages, .empty-state {
@@ -1458,25 +1632,11 @@ onUnmounted(() => {
   align-items: center;
   justify-content: center;
   height: 100%;
-  color: #666;
-  font-size: 14px;
+  color: var(--text-light);
+  font-size: 15px;
 }
 
-/* PC端优化 */
-@media (min-width: 769px) {
-  .chat-messages {
-    padding: 24px;
-    max-width: 1200px;
-    margin: 0 auto;
-    width: 100%;
-  }
-  
-  .message {
-    max-width: 65%;
-  }
-}
-
-/* 响应式设计 - 移动端 */
+/* 移动端响应式 */
 @media (max-width: 768px) {
   .mobile-menu-btn {
     display: flex;
@@ -1491,9 +1651,9 @@ onUnmounted(() => {
     top: 0;
     left: 0;
     bottom: 0;
-    width: 280px;
+    width: 300px;
     transform: translateX(-100%);
-    box-shadow: 2px 0 8px rgba(0, 0, 0, 0.3);
+    box-shadow: 4px 0 24px rgba(0, 0, 0, 0.1);
   }
 
   .sidebar.sidebar-open {
@@ -1505,49 +1665,36 @@ onUnmounted(() => {
   }
 
   .chat-header {
-    padding: 12px 16px;
-    padding-left: 60px;
+    padding: 16px 20px;
+    padding-left: 70px;
   }
 
   .chat-header h2 {
-    font-size: 16px;
+    font-size: 18px;
   }
 
   .chat-messages {
-    padding: 16px;
-    gap: 12px;
+    padding: 20px 16px;
+    gap: 14px;
   }
 
-
   .user-info {
-    padding: 12px 16px;
+    padding: 16px 20px;
   }
 
   .sidebar-header {
-    padding: 16px;
+    padding: 20px;
   }
 
   .sidebar-header h1 {
-    font-size: 20px;
+    font-size: 22px;
   }
 }
 
-/* 响应式设计 - 小屏手机 */
-@media (max-width: 480px) {
-  .sidebar {
-    width: 100%;
-  }
-
-
-  .chat-header {
-    padding-left: 56px;
-  }
-}
-
-/* 滚动条样式优化 */
+/* 滚动条样式 */
 .chat-messages::-webkit-scrollbar,
 .room-list::-webkit-scrollbar {
-  width: 6px;
+  width: 5px;
 }
 
 .chat-messages::-webkit-scrollbar-track,
@@ -1557,66 +1704,39 @@ onUnmounted(() => {
 
 .chat-messages::-webkit-scrollbar-thumb,
 .room-list::-webkit-scrollbar-thumb {
-  background: #444;
-  border-radius: 3px;
+  background: linear-gradient(#ff6b9d, #ff9f43);
+  border-radius: var(--radius-full);
 }
 
 .chat-messages::-webkit-scrollbar-thumb:hover,
 .room-list::-webkit-scrollbar-thumb:hover {
-  background: #555;
+  background: linear-gradient(#ff6b9d, #4ecdc4);
 }
 
-/* 输入框聚焦动画 */
-.message-input:focus {
-  transform: scale(1.01);
-  transition: all 0.2s;
-}
-
-/* 加载动画 */
-.loading {
-  position: relative;
-}
-
-.loading::after {
-  content: '';
-  position: absolute;
-  width: 20px;
-  height: 20px;
-  top: 50%;
-  left: 50%;
-  margin-left: -10px;
-  margin-top: -10px;
-  border: 2px solid #444;
-  border-top-color: #667eea;
-  border-radius: 50%;
-  animation: spin 0.8s linear infinite;
-}
-
-@keyframes spin {
-  to {
-    transform: rotate(360deg);
-  }
-}
-
-/* 用户详情弹窗样式 */
+/* 用户详情弹窗 */
 .user-detail-modal {
-  max-width: 500px;
+  max-width: 480px;
   width: 90%;
+  background: rgba(255, 255, 255, 0.95);
+  backdrop-filter: blur(20px);
+  border-radius: var(--radius-xl);
+  overflow: hidden;
 }
 
 .user-detail-body {
-  padding: 24px;
+  padding: 28px;
 }
 
 .loading-detail {
   text-align: center;
   padding: 40px;
-  color: #999;
+  color: var(--text-light);
 }
 
 .user-detail-content {
   display: flex;
   flex-direction: column;
+  align-items: center;
   gap: 24px;
 }
 
@@ -1635,16 +1755,19 @@ onUnmounted(() => {
 .detail-avatar-placeholder {
   width: 120px;
   height: 120px;
-  border-radius: 50%;
+  border-radius: var(--radius-lg);
   object-fit: cover;
-  border: 3px solid #667eea;
+  border: 3px solid transparent;
+  background-image: linear-gradient(#fff, #fff), linear-gradient(135deg, #ff6b9d, #4ecdc4);
+  background-origin: border-box;
+  background-clip: padding-box, border-box;
 }
 
 .detail-avatar-placeholder {
   display: flex;
   align-items: center;
   justify-content: center;
-  background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
+  background: linear-gradient(135deg, #ff6b9d, #ff9f43);
   color: white;
   font-size: 48px;
   font-weight: 600;
@@ -1652,13 +1775,13 @@ onUnmounted(() => {
 
 .avatar-edit-btn {
   position: absolute;
-  bottom: 0;
-  right: 0;
+  bottom: -4px;
+  right: -4px;
   width: 36px;
   height: 36px;
   border-radius: 50%;
-  background: #667eea;
-  border: 2px solid #1a1a1a;
+  background: linear-gradient(135deg, #ff6b9d, #ff9f43);
+  border: 2px solid white;
   color: white;
   cursor: pointer;
   display: flex;
@@ -1669,10 +1792,10 @@ onUnmounted(() => {
   flex-direction: column;
   gap: 2px;
   padding: 2px;
+  box-shadow: 0 4px 12px rgba(255, 107, 157, 0.3);
 }
 
 .avatar-edit-btn:hover:not(:disabled) {
-  background: #5568d3;
   transform: scale(1.1);
 }
 
@@ -1682,14 +1805,15 @@ onUnmounted(() => {
 }
 
 .avatar-edit-btn svg {
-  width: 14px;
-  height: 14px;
+  width: 16px;
+  height: 16px;
 }
 
 .detail-info-section {
   display: flex;
   flex-direction: column;
-  gap: 16px;
+  gap: 18px;
+  width: 100%;
 }
 
 .detail-info-item {
@@ -1700,83 +1824,85 @@ onUnmounted(() => {
 
 .detail-info-item label {
   font-size: 12px;
-  color: #999;
+  color: var(--text-light);
   font-weight: 500;
+  text-transform: uppercase;
+  letter-spacing: 0.5px;
 }
 
 .detail-info-value {
-  font-size: 14px;
-  color: #fff;
+  font-size: 15px;
+  color: var(--text-primary);
   display: flex;
   align-items: center;
   gap: 8px;
 }
 
 .detail-username {
-  color: #999;
-  font-size: 13px;
+  color: var(--text-secondary);
+  font-size: 14px;
 }
 
 .edit-btn-small {
-  width: 20px;
-  height: 20px;
+  width: 24px;
+  height: 24px;
   padding: 0;
   background: transparent;
   border: none;
-  color: #667eea;
+  color: #ff6b9d;
   cursor: pointer;
   display: flex;
   align-items: center;
   justify-content: center;
-  border-radius: 4px;
+  border-radius: var(--radius-sm);
   transition: all 0.2s;
   margin-left: auto;
 }
 
 .edit-btn-small:hover {
-  background: rgba(102, 126, 234, 0.1);
-  color: #5568d3;
+  background: rgba(255, 107, 157, 0.1);
 }
 
-/* 修改昵称弹窗样式 */
+/* 弹窗样式 */
 .modal-overlay {
   position: fixed;
   top: 0;
   left: 0;
   right: 0;
   bottom: 0;
-  background: rgba(0, 0, 0, 0.6);
+  background: rgba(255, 255, 255, 0.8);
+  backdrop-filter: blur(8px);
   display: flex;
   align-items: center;
   justify-content: center;
   z-index: 2000;
-  backdrop-filter: blur(4px);
 }
 
 .modal-content {
-  background: #252525;
-  border-radius: 12px;
+  background: rgba(255, 255, 255, 0.95);
+  backdrop-filter: blur(20px);
+  border-radius: var(--radius-xl);
   width: 90%;
   max-width: 400px;
-  border: 1px solid #333;
-  box-shadow: 0 8px 32px rgba(0, 0, 0, 0.4);
+  box-shadow: 0 8px 32px rgba(0, 0, 0, 0.1);
   animation: modalFadeIn 0.3s ease;
+  overflow: hidden;
 }
 
 @keyframes modalFadeIn {
   from {
     opacity: 0;
-    transform: scale(0.9);
+    transform: scale(0.9) translateY(20px);
   }
   to {
     opacity: 1;
-    transform: scale(1);
+    transform: scale(1) translateY(0);
   }
 }
 
 .modal-header {
   padding: 20px 24px;
-  border-bottom: 1px solid #333;
+  border-bottom: 1px solid rgba(0, 0, 0, 0.05);
   display: flex;
   align-items: center;
   justify-content: space-between;
@@ -1785,21 +1911,21 @@ onUnmounted(() => {
 .modal-header h3 {
   margin: 0;
   font-size: 18px;
-  color: #fff;
-  font-weight: 500;
+  color: var(--text-primary);
+  font-weight: 600;
 }
 
 .modal-close-btn {
-  width: 28px;
-  height: 28px;
+  width: 32px;
+  height: 32px;
   padding: 0;
-  background: transparent;
+  background: rgba(0, 0, 0, 0.05);
   border: none;
-  color: #999;
+  color: var(--text-secondary);
   font-size: 24px;
   line-height: 1;
   cursor: pointer;
-  border-radius: 4px;
+  border-radius: var(--radius-md);
   display: flex;
   align-items: center;
   justify-content: center;
@@ -1807,8 +1933,8 @@ onUnmounted(() => {
 }
 
 .modal-close-btn:hover {
-  background: #333;
-  color: #fff;
+  background: rgba(255, 107, 157, 0.1);
+  color: #ff6b9d;
 }
 
 .modal-body {
@@ -1817,29 +1943,31 @@ onUnmounted(() => {
 
 .nickname-input {
   width: 100%;
-  padding: 12px 16px;
-  background: #1a1a1a;
-  border: 1px solid #333;
-  border-radius: 8px;
-  color: #fff;
-  font-size: 14px;
+  padding: 14px 18px;
+  background: rgba(255, 255, 255, 0.8);
+  border: 2px solid transparent;
+  border-radius: var(--radius-md);
+  color: var(--text-primary);
+  font-size: 15px;
   outline: none;
-  transition: all 0.2s;
+  transition: all 0.3s;
   box-sizing: border-box;
+  background-image: linear-gradient(#fff, #fff), linear-gradient(135deg, #ff6b9d, #4ecdc4);
+  background-origin: border-box;
+  background-clip: padding-box, border-box;
 }
 
 .nickname-input:focus {
-  border-color: #667eea;
-  box-shadow: 0 0 0 3px rgba(102, 126, 234, 0.1);
+  box-shadow: 0 0 20px rgba(255, 107, 157, 0.15);
 }
 
 .nickname-input::placeholder {
-  color: #666;
+  color: var(--text-light);
 }
 
 .modal-footer {
   padding: 16px 24px;
-  border-top: 1px solid #333;
+  border-top: 1px solid rgba(0, 0, 0, 0.05);
   display: flex;
   gap: 12px;
   justify-content: flex-end;
@@ -1847,8 +1975,8 @@ onUnmounted(() => {
 
 .btn-cancel,
 .btn-save {
-  padding: 10px 20px;
-  border-radius: 6px;
+  padding: 12px 24px;
+  border-radius: var(--radius-md);
   font-size: 14px;
   font-weight: 500;
   cursor: pointer;
@@ -1857,21 +1985,23 @@ onUnmounted(() => {
 }
 
 .btn-cancel {
-  background: #333;
-  color: #e0e0e0;
+  background: rgba(0, 0, 0, 0.05);
+  color: var(--text-secondary);
 }
 
 .btn-cancel:hover {
-  background: #3a3a3a;
+  background: rgba(0, 0, 0, 0.1);
 }
 
 .btn-save {
-  background: #667eea;
-  color: #fff;
+  background: linear-gradient(135deg, #ff6b9d, #ff9f43);
+  color: white;
+  box-shadow: 0 4px 12px rgba(255, 107, 157, 0.3);
 }
 
 .btn-save:hover:not(:disabled) {
-  background: #5568d3;
+  transform: translateY(-2px);
+  box-shadow: 0 6px 20px rgba(255, 107, 157, 0.4);
 }
 
 .btn-save:disabled {
@@ -1879,7 +2009,7 @@ onUnmounted(() => {
   cursor: not-allowed;
 }
 
-/* 聊天标题区域 */
+/* 聊天标题 */
 .chat-title-section {
   display: flex;
   align-items: center;
@@ -1887,20 +2017,20 @@ onUnmounted(() => {
 }
 
 .member-count {
-  font-size: 16px;
+  font-size: 15px;
   font-weight: normal;
-  color: #999;
+  color: var(--text-secondary);
   margin-left: 4px;
 }
 
 .members-btn {
-  width: 32px;
-  height: 32px;
+  width: 36px;
+  height: 36px;
   padding: 0;
-  background: transparent;
-  border: 1px solid #444;
-  border-radius: 6px;
-  color: #e0e0e0;
+  background: rgba(78, 205, 196, 0.1);
+  border: 1px solid rgba(78, 205, 196, 0.3);
+  border-radius: var(--radius-md);
+  color: #4ecdc4;
   cursor: pointer;
   display: flex;
   align-items: center;
@@ -1910,9 +2040,8 @@ onUnmounted(() => {
 }
 
 .members-btn:hover {
-  background: #333;
-  border-color: #555;
-  color: #fff;
+  background: rgba(78, 205, 196, 0.2);
+  transform: scale(1.05);
 }
 
 .members-btn svg {
@@ -1921,60 +2050,60 @@ onUnmounted(() => {
 }
 
 .online-count {
-  margin: 4px 0 0 0;
-  font-size: 12px;
-  color: #999;
+  margin: 6px 0 0 0;
+  font-size: 13px;
+  color: var(--text-secondary);
   text-align: center;
   display: flex;
   align-items: center;
   justify-content: center;
-  gap: 4px;
+  gap: 6px;
 }
 
 .online-dot {
   width: 8px;
   height: 8px;
   border-radius: 50%;
-  background: #4caf50;
+  background: #4ecdc4;
   display: inline-block;
   animation: pulse 2s infinite;
 }
 
 .btn-close {
-  padding: 8px 20px;
-  background: #333;
-  color: #e0e0e0;
+  padding: 10px 24px;
+  background: rgba(0, 0, 0, 0.05);
+  color: var(--text-secondary);
   border: none;
-  border-radius: 6px;
+  border-radius: var(--radius-md);
   font-size: 14px;
   cursor: pointer;
   transition: all 0.2s;
 }
 
 .btn-close:hover {
-  background: #3a3a3a;
+  background: rgba(0, 0, 0, 0.1);
 }
 
 @keyframes pulse {
   0%, 100% {
     opacity: 1;
+    transform: scale(1);
   }
   50% {
-    opacity: 0.5;
+    opacity: 0.7;
+    transform: scale(0.9);
   }
 }
 
-/* 群成员列表弹窗 */
-/* 已迁移至 components/chat/MembersModal.vue */
-
-/* 图片预览弹窗 */
+/* 图片预览 */
 .image-preview-overlay {
   position: fixed;
   top: 0;
   left: 0;
   right: 0;
   bottom: 0;
-  background: rgba(0, 0, 0, 0.9);
+  background: rgba(255, 255, 255, 0.95);
+  backdrop-filter: blur(20px);
   display: flex;
   align-items: center;
   justify-content: center;
@@ -1984,12 +2113,8 @@ onUnmounted(() => {
 }
 
 @keyframes fadeIn {
-  from {
-    opacity: 0;
-  }
-  to {
-    opacity: 1;
-  }
+  from { opacity: 0; }
+  to { opacity: 1; }
 }
 
 .image-preview-container {
@@ -2004,14 +2129,14 @@ onUnmounted(() => {
 
 .image-preview-close {
   position: absolute;
-  top: -40px;
+  top: -50px;
   right: 0;
-  width: 36px;
-  height: 36px;
-  background: rgba(255, 255, 255, 0.2);
-  border: 1px solid rgba(255, 255, 255, 0.3);
+  width: 40px;
+  height: 40px;
+  background: rgba(255, 107, 157, 0.1);
+  border: none;
   border-radius: 50%;
-  color: white;
+  color: #ff6b9d;
   font-size: 24px;
   line-height: 1;
   cursor: pointer;
@@ -2023,7 +2148,7 @@ onUnmounted(() => {
 }
 
 .image-preview-close:hover {
-  background: rgba(255, 255, 255, 0.3);
+  background: rgba(255, 107, 157, 0.2);
   transform: scale(1.1);
 }
 
@@ -2031,7 +2156,7 @@ onUnmounted(() => {
   max-width: 100%;
   max-height: 90vh;
   object-fit: contain;
-  border-radius: 8px;
-  box-shadow: 0 8px 32px rgba(0, 0, 0, 0.5);
+  border-radius: var(--radius-lg);
+  box-shadow: 0 8px 32px rgba(0, 0, 0, 0.15);
 }
 </style>

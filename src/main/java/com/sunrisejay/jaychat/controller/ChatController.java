@@ -245,4 +245,21 @@ public class ChatController extends BaseController {
         // 使用 UserConverter 转换为 UserDetailResponse
         return ApiResponse.success(userConverter.toDetailResponse(otherUser));
     }
+
+    /**
+     * 删除会话（退出会话）
+     */
+    @DeleteMapping("/sessions/{sessionId}")
+    public ApiResponse<Void> deleteSession(
+            @PathVariable("sessionId") Long sessionId,
+            HttpServletRequest request) {
+        ApiResponse<?> authCheck = checkAuth(request);
+        if (authCheck != null) {
+            return (ApiResponse<Void>) authCheck;
+        }
+
+        Long userId = getCurrentUserId(request);
+        chatService.deleteSession(sessionId, userId);
+        return ApiResponse.success(null);
+    }
 }

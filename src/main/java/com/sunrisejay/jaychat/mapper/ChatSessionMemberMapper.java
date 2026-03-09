@@ -33,4 +33,10 @@ public interface ChatSessionMemberMapper {
      * 统计会话成员总数
      */
     Integer countMembers(@Param("sessionId") Long sessionId);
+
+    @Delete("DELETE FROM chat_session_member WHERE session_id = #{sessionId} AND user_id = #{userId}")
+    int delete(@Param("sessionId") Long sessionId, @Param("userId") Long userId);
+
+    @Delete("DELETE FROM chat_session_member WHERE session_id = #{sessionId}")
+    int deleteBySessionId(Long sessionId);
 }

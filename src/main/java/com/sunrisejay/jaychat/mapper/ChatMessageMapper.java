@@ -1,6 +1,7 @@
 package com.sunrisejay.jaychat.mapper;
 
 import com.sunrisejay.jaychat.entity.ChatMessage;
+import org.apache.ibatis.annotations.Delete;
 import org.apache.ibatis.annotations.Insert;
 import org.apache.ibatis.annotations.Mapper;
 import org.apache.ibatis.annotations.Options;
@@ -35,4 +36,7 @@ public interface ChatMessageMapper {
 
     @Select("SELECT COUNT(*) FROM chat_message WHERE session_id = #{sessionId}")
     int countBySessionId(Long sessionId);
+
+    @Delete("DELETE FROM chat_message WHERE session_id = #{sessionId}")
+    int deleteBySessionId(Long sessionId);
 }

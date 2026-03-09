@@ -110,3 +110,8 @@ export const createPrivateSession = (targetUserId: number): Promise<ChatSession>
 export const getPrivateSessionOtherMember = (sessionId: number): Promise<ContactUser | null> => {
   return request.get(`/api/chat/sessions/${sessionId}/other-member`)
 }
+
+// 删除会话（退出会话）
+export const deleteSession = (sessionId: number): Promise<void> => {
+  return request.delete(`/api/chat/sessions/${sessionId}`)
+}

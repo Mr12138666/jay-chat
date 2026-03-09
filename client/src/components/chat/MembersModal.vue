@@ -62,25 +62,26 @@ const emit = defineEmits<{
   left: 0;
   right: 0;
   bottom: 0;
-  background: rgba(0, 0, 0, 0.6);
+  background: rgba(255, 255, 255, 0.8);
+  backdrop-filter: blur(8px);
   display: flex;
   align-items: center;
   justify-content: center;
   z-index: 2000;
-  backdrop-filter: blur(4px);
 }
 
 .modal-content {
-  background: #252525;
-  border-radius: 12px;
+  background: rgba(255, 255, 255, 0.95);
+  backdrop-filter: blur(20px);
+  border-radius: 20px;
   width: 90%;
-  border: 1px solid #333;
-  box-shadow: 0 8px 32px rgba(0, 0, 0, 0.4);
+  border: 1px solid rgba(255, 255, 255, 0.8);
+  box-shadow: 0 8px 32px rgba(0, 0, 0, 0.1);
 }
 
 .modal-header {
   padding: 20px 24px;
-  border-bottom: 1px solid #333;
+  border-bottom: 1px solid rgba(0, 0, 0, 0.05);
   display: flex;
   align-items: center;
   justify-content: space-between;
@@ -89,21 +90,21 @@ const emit = defineEmits<{
 .modal-header h3 {
   margin: 0;
   font-size: 18px;
-  color: #fff;
-  font-weight: 500;
+  color: var(--text-primary);
+  font-weight: 600;
 }
 
 .modal-close-btn {
-  width: 28px;
-  height: 28px;
+  width: 32px;
+  height: 32px;
   padding: 0;
-  background: transparent;
+  background: rgba(0, 0, 0, 0.05);
   border: none;
-  color: #999;
-  font-size: 18px;
+  color: var(--text-secondary);
+  font-size: 20px;
   line-height: 1;
   cursor: pointer;
-  border-radius: 4px;
+  border-radius: 12px;
   display: flex;
   align-items: center;
   justify-content: center;
@@ -111,24 +112,24 @@ const emit = defineEmits<{
 }
 
 .modal-close-btn:hover {
-  background: #333;
-  color: #fff;
+  background: rgba(255, 107, 157, 0.1);
+  color: #ff6b9d;
 }
 
 .modal-body {
-  padding: 24px;
+  padding: 0;
 }
 
 .modal-footer {
   padding: 16px 24px;
-  border-top: 1px solid #333;
+  border-top: 1px solid rgba(0, 0, 0, 0.05);
   display: flex;
   gap: 12px;
   justify-content: flex-end;
 }
 
 .members-modal {
-  max-width: 500px;
+  max-width: 480px;
   max-height: 80vh;
   display: flex;
   flex-direction: column;
@@ -146,7 +147,8 @@ const emit = defineEmits<{
 .empty-members {
   padding: 40px 24px;
   text-align: center;
-  color: #999;
+  color: var(--text-light);
+  font-size: 14px;
 }
 
 .members-list {
@@ -158,14 +160,14 @@ const emit = defineEmits<{
 .member-item {
   display: flex;
   align-items: center;
-  gap: 12px;
-  padding: 12px 24px;
-  border-bottom: 1px solid #333;
-  transition: background 0.2s;
+  gap: 14px;
+  padding: 14px 24px;
+  border-bottom: 1px solid rgba(0, 0, 0, 0.03);
+  transition: all 0.2s;
 }
 
 .member-item:hover {
-  background: #2a2a2a;
+  background: rgba(255, 107, 157, 0.05);
 }
 
 .member-item:last-child {
@@ -173,10 +175,10 @@ const emit = defineEmits<{
 }
 
 .member-avatar {
-  width: 40px;
-  height: 40px;
-  border-radius: 50%;
-  background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
+  width: 44px;
+  height: 44px;
+  border-radius: 14px;
+  background: linear-gradient(135deg, #4ecdc4, #44a08d);
   display: flex;
   align-items: center;
   justify-content: center;
@@ -184,6 +186,7 @@ const emit = defineEmits<{
   color: white;
   flex-shrink: 0;
   font-size: 16px;
+  box-shadow: 0 4px 12px rgba(78, 205, 196, 0.3);
 }
 
 .member-info {
@@ -200,13 +203,13 @@ const emit = defineEmits<{
 
 .member-name {
   font-size: 14px;
-  font-weight: 500;
-  color: #fff;
+  font-weight: 600;
+  color: var(--text-primary);
 }
 
 .member-username {
   font-size: 12px;
-  color: #999;
+  color: var(--text-light);
 }
 
 .member-status {
@@ -224,15 +227,16 @@ const emit = defineEmits<{
   width: 10px;
   height: 10px;
   border-radius: 50%;
-  background: #4caf50;
+  background: #4ecdc4;
   display: inline-block;
+  box-shadow: 0 0 8px rgba(78, 205, 196, 0.5);
 }
 
 .offline-dot-small {
   width: 10px;
   height: 10px;
   border-radius: 50%;
-  background: #666;
+  background: var(--text-light);
   display: inline-block;
 }
 
@@ -241,29 +245,32 @@ const emit = defineEmits<{
   align-items: center;
   justify-content: space-between;
   padding: 16px 24px;
-  border-top: 1px solid #333;
+  border-top: 1px solid rgba(0, 0, 0, 0.05);
 }
 
 .members-stats {
   display: flex;
   gap: 16px;
-  font-size: 12px;
-  color: #999;
+  font-size: 13px;
+  color: var(--text-secondary);
 }
 
 .btn-close {
-  padding: 8px 20px;
-  background: #333;
-  color: #e0e0e0;
+  padding: 10px 24px;
+  background: linear-gradient(135deg, #ff6b9d, #ff9f43);
+  color: white;
   border: none;
-  border-radius: 6px;
+  border-radius: 12px;
   font-size: 14px;
+  font-weight: 500;
   cursor: pointer;
-  transition: all 0.2s;
+  transition: all 0.3s;
+  box-shadow: 0 4px 12px rgba(255, 107, 157, 0.3);
 }
 
 .btn-close:hover {
-  background: #3a3a3a;
+  transform: translateY(-2px);
+  box-shadow: 0 6px 20px rgba(255, 107, 157, 0.4);
 }
 
 @media (max-width: 768px) {
@@ -273,7 +280,7 @@ const emit = defineEmits<{
   }
 
   .member-item {
-    padding: 10px 16px;
+    padding: 12px 16px;
   }
 
   .members-footer {
