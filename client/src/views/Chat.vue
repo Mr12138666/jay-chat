@@ -373,7 +373,7 @@ const handleDeleteSession = async (sessionId: number, event: Event) => {
     // 如果删除的是当前会话，切换到第一个可用会话
     if (currentSessionId.value === sessionId) {
       const remainingSessions = sessions.value.filter(s => s.id !== sessionId)
-      if (remainingSessions.length > 0) {
+      if (remainingSessions.length > 0 && remainingSessions[0]) {
         await switchSession(remainingSessions[0].id)
       } else {
         currentSessionId.value = null
@@ -644,6 +644,15 @@ const doCreateGroup = async () => {
   }
 }
 
+// 包装消息处理函数，区分普通消息和撤回消息
+const handleWsMessage = (message: import('../utils/websocket').ChatMessage) => {
+  if (message.recalled) {
+    handleRecallMessage(message)
+  } else {
+    handleMessage(message)
+  }
+}
+
 // 加载成员数据
 const loadMembersData = async () => {
   if (!currentSessionId.value) return
@@ -768,15 +777,6 @@ onMounted(async () => {
     wsConnected.value = connected
     console.log('WebSocket 连接状态变更:', connected)
   })
-
-  // 包装消息处理函数，区分普通消息和撤回消息
-  const handleWsMessage = (message: import('../utils/websocket').ChatMessage) => {
-    if (message.recalled) {
-      handleRecallMessage(message)
-    } else {
-      handleMessage(message)
-    }
-  }
 
   // 使用新的 token 连接 WebSocket
   // 注意：connect 的回调中会自动订阅 currentSessionId（如果已设置）

@@ -273,8 +273,8 @@ export const useChatMessages = ({
   // 处理撤回消息
   const handleRecallMessage = (message: ChatMessage) => {
     const msgIndex = messages.value.findIndex(msg => msg.id === message.id)
-    if (msgIndex !== -1) {
-      messages.value[msgIndex].recalled = true
+    if (msgIndex !== -1 && messages.value[msgIndex]) {
+      messages.value[msgIndex]!.recalled = true
     }
   }
 
