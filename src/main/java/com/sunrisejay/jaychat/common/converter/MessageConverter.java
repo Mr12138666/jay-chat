@@ -24,6 +24,7 @@ public class MessageConverter {
         response.setId(message.getId());
         response.setSessionId(message.getSessionId());
         response.setSenderId(message.getSenderId());
+        response.setBotId(message.getBotId());
         response.setContent(message.getContent());
         response.setContentType(message.getContentType());
         response.setSentAt(message.getSentAt());

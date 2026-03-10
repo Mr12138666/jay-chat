@@ -12,6 +12,10 @@ public class MessageResponse {
     private Long id;
     private Long sessionId;
     private Long senderId;
+    /**
+     * AI 机器人ID（普通用户消息为 null）
+     */
+    private Long botId;
     private String senderNickname;
     private String content;
     private String contentType;

@@ -29,7 +29,7 @@ export const useChatMessages = ({
   const loading = ref(false)
 
   // 引用的消息
-  const replyingTo = ref<{ id: number; sender: string; content: string } | null>(null)
+  const replyingTo = ref<{ id: number; sender: string; content: string; isBotMessage?: boolean; botId?: number } | null>(null)
 
   const showEmojiPicker = ref(false)
   const uploadingImage = ref(false)
@@ -37,7 +37,7 @@ export const useChatMessages = ({
   const previewImageUrl = ref<string | null>(null)
 
   // 设置引用消息
-  const setReplyingTo = (message: { id: number; sender: string; content: string } | null) => {
+  const setReplyingTo = (message: { id: number; sender: string; content: string; isBotMessage?: boolean; botId?: number } | null) => {
     replyingTo.value = message
   }
 
@@ -59,22 +59,24 @@ export const useChatMessages = ({
         sender: msg.senderNickname || `用户${msg.senderId}`,
         content: msg.contentType === 'image' ? msg.content : convertEmojiCodesInText(msg.content),
         time: formatTime(msg.sentAt),
+        sentAtRaw: msg.sentAt,
         senderId: msg.senderId,
-        senderAvatar: msg.senderId ? undefined : null,
+        senderAvatar: msg.botId ? null : (msg.senderId ? undefined : null),
         contentType: msg.contentType || 'text',
         replyToId: msg.replyToId,
         replyToNickname: msg.replyToNickname,
         replyToContent: msg.replyToContent,
-        recalled: msg.recalled
+        recalled: msg.recalled,
+        isBotMessage: !!msg.botId,
+        botId: msg.botId
       })).reverse()
 
       await nextTick()
       scrollToBottom()
-      setTimeout(() => scrollToBottom(), 100)
 
       // Fill avatar cache output lazily with already-fetched avatars.
       await Promise.all(messages.value.map(async (msg) => {
-        if (msg.senderId) {
+        if (msg.senderId && !msg.isBotMessage) {
           msg.senderAvatar = await getUserAvatar(msg.senderId)
         }
       }))
@@ -88,9 +90,18 @@ export const useChatMessages = ({
   const sendMessage = async () => {
     if (!inputMessage.value.trim() || !currentSessionId.value) return
 
-    const content = inputMessage.value.trim()
+    const rawContent = inputMessage.value.trim()
+    let content = rawContent
     const tempId = Date.now()
     const userId = currentUser.value?.id || 0
+
+    // 引用机器人消息时，若未显式@机器人，则自动补齐，保证能触发 AI 回复
+    if (replyingTo.value?.isBotMessage) {
+      const mention = `@${replyingTo.value.sender}`
+      if (!rawContent.startsWith(mention) && !rawContent.includes(`${mention} `)) {
+        content = `${mention} ${rawContent}`
+      }
+    }
 
     // 保存引用消息信息
     const replyInfo = replyingTo.value ? {
@@ -115,6 +126,7 @@ export const useChatMessages = ({
       sender: currentUser.value?.nickname || '我',
       content: convertEmojiCodesInText(content),
       time: formatTime(new Date().toISOString()),
+      sentAtRaw: new Date().toISOString(),
       senderId: userId,
       senderAvatar: avatar,
       contentType: 'text',
@@ -213,35 +225,82 @@ export const useChatMessages = ({
       return
     }
 
-    // 如果消息有 ID，检查是否已存在（处理服务器返回的消息）
-    if (message.id) {
-      // 查找是否有临时消息需要替换（通过 senderId 和 content 匹配）
+    const isBotMessage = !!message.botId
+    const senderName = message.senderNickname ||
+      (isBotMessage ? `AI 助手${message.botId}` : (message.senderId ? `用户${message.senderId}` : '未知用户'))
+    const displayContent = message.contentType === 'image'
+      ? message.content
+      : convertEmojiCodesInText(message.content)
+
+    // 先按最终ID去重
+    if (message.id && messages.value.some(msg => msg.id === message.id)) {
+      return
+    }
+
+    // 流式 bot 最终消息：优先替换最近的 bot 气泡，避免出现两条回复
+    if (isBotMessage && message.id) {
+      const finalTs = message.sentAt ? Date.parse(message.sentAt) : NaN
+
+      for (let i = messages.value.length - 1; i >= 0; i--) {
+        const msg = messages.value[i]
+        if (!msg?.isBotMessage || msg.botId !== message.botId) {
+          continue
+        }
+
+        const msgTs = msg.sentAtRaw ? Date.parse(msg.sentAtRaw) : NaN
+        const closeTime = !Number.isNaN(finalTs) && !Number.isNaN(msgTs)
+          ? Math.abs(finalTs - msgTs) <= 120000
+          : false
+        const sameContent = (msg.content || '').trim() === (displayContent || '').trim()
+
+        if (msg.streaming || (sameContent && closeTime)) {
+          messages.value[i] = {
+            ...msg,
+            id: message.id,
+            sender: senderName,
+            content: displayContent,
+            time: formatTime(message.sentAt),
+            sentAtRaw: message.sentAt,
+            senderId: message.senderId,
+            senderAvatar: null,
+            contentType: message.contentType || 'text',
+            replyToId: message.replyToId,
+            replyToNickname: message.replyToNickname,
+            replyToContent: message.replyToContent,
+            recalled: message.recalled,
+            isBotMessage: true,
+            botId: message.botId,
+            streaming: false
+          }
+
+          nextTick(() => scrollToBottom(true))
+          return
+        }
+      }
+    }
+
+    // 如果消息有 ID，检查是否有本地临时消息需要替换（仅用户消息）
+    if (message.id && !isBotMessage) {
       const tempIndex = messages.value.findIndex(msg =>
         msg.id && typeof msg.id === 'number' && msg.id > Date.now() - 10000 &&
-        msg.senderId === message.senderId && msg.content === (message.contentType === 'image' ? message.content : convertEmojiCodesInText(message.content))
+        msg.senderId === message.senderId &&
+        msg.content === (message.contentType === 'image' ? message.content : convertEmojiCodesInText(message.content))
       )
 
       if (tempIndex !== -1) {
-        // 保留原来的头像，只更新 ID 和时间
         const tempMsg = messages.value[tempIndex]!
         messages.value[tempIndex] = {
           ...tempMsg,
           id: message.id,
-          time: formatTime(message.sentAt)
+          time: formatTime(message.sentAt),
+          sentAtRaw: message.sentAt
         }
-        return
-      }
-
-      // 如果已有相同 ID 的消息，不重复添加
-      if (messages.value.some(msg => msg.id === message.id)) {
         return
       }
     }
 
-    const senderName = message.senderNickname || (message.senderId ? `用户${message.senderId}` : '未知用户')
-
     let senderAvatar: string | null = null
-    if (message.senderId) {
+    if (message.senderId && !isBotMessage) {
       try {
         senderAvatar = await getUserAvatar(message.senderId)
       } catch {
@@ -249,22 +308,22 @@ export const useChatMessages = ({
       }
     }
 
-    const displayContent = message.contentType === 'image'
-      ? message.content
-      : convertEmojiCodesInText(message.content)
 
     messages.value.push({
       id: message.id || Date.now(),
       sender: senderName,
       content: displayContent,
       time: formatTime(message.sentAt),
+      sentAtRaw: message.sentAt,
       senderId: message.senderId,
       senderAvatar,
       contentType: message.contentType || 'text',
       replyToId: message.replyToId,
       replyToNickname: message.replyToNickname,
       replyToContent: message.replyToContent,
-      recalled: message.recalled
+      recalled: message.recalled,
+      isBotMessage,
+      botId: message.botId
     })
 
     nextTick(() => scrollToBottom(true))

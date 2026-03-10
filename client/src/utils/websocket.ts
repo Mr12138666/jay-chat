@@ -6,6 +6,7 @@ export interface ChatMessage {
   id?: number
   sessionId: number
   senderId: number
+  botId?: number
   senderNickname?: string
   content: string
   contentType?: string
@@ -265,6 +266,12 @@ class WebSocketService {
       return
     }
 
+    // 切换到单会话订阅前，先清理多会话订阅，避免重复回调
+    if (this.subscriptions.size > 0) {
+      this.subscriptions.forEach((sub) => sub.unsubscribe())
+      this.subscriptions.clear()
+    }
+
     // 如果已经订阅了同一个会话，不需要重新订阅
     if (this.currentSessionId === sessionId && this.currentSubscription) {
       debugLog('已订阅该会话，跳过')
@@ -307,6 +314,12 @@ class WebSocketService {
     if (!this.client || !this.client.active) {
       console.error('WebSocket 未连接，无法订阅会话')
       return
+    }
+
+    // 切换到多会话订阅前，先取消单会话订阅，避免当前会话重复收到消息
+    if (this.currentSubscription) {
+      this.currentSubscription.unsubscribe()
+      this.currentSubscription = null
     }
 
     // 取消所有之前的订阅

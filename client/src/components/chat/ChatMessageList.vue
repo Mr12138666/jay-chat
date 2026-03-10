@@ -1,6 +1,7 @@
 <script setup lang="ts">
 import { getMessageBackgroundColor } from '../../utils/color'
 import type { UiChatMessage } from '../../types/chat-ui'
+import MarkdownRender from './MarkdownRender.vue'
 
 defineProps<{
   loading: boolean
@@ -10,8 +11,9 @@ defineProps<{
 
 const emit = defineEmits<{
   openUserDetail: [userId: number]
+  openBotDetail: [botId: number]
   openImagePreview: [imageUrl: string]
-  replyMessage: [message: { id: number; sender: string; content: string }]
+  replyMessage: [message: { id: number; sender: string; content: string; isBotMessage?: boolean; botId?: number }]
   recallMessage: [messageId: number]
 }>()
 </script>
@@ -24,12 +26,15 @@ const emit = defineEmits<{
       v-for="msg in messages"
       :key="msg.id"
       class="message"
-      :class="{ 'own-message': msg.senderId === currentUserId }"
+      :class="{
+        'own-message': !msg.isBotMessage && msg.senderId === currentUserId,
+        'bot-message': msg.isBotMessage
+      }"
     >
       <div
         class="message-avatar"
-        @click="msg.senderId && emit('openUserDetail', msg.senderId)"
-        :title="`点击查看 ${msg.sender} 的详情`"
+        @click="msg.isBotMessage ? (msg.botId && emit('openBotDetail', msg.botId)) : (msg.senderId && emit('openUserDetail', msg.senderId))"
+        :title="msg.isBotMessage ? `点击查看 ${msg.sender} 详情` : `点击查看 ${msg.sender} 的详情`"
       >
         <img
           v-if="msg.senderAvatar"
@@ -48,12 +53,12 @@ const emit = defineEmits<{
           <span class="time">{{ msg.time }}</span>
           <!-- 撤回按钮：仅消息发送者可见，且消息未被撤回 -->
           <button
-            v-if="msg.senderId === currentUserId && !msg.recalled"
+            v-if="!msg.isBotMessage && msg.senderId === currentUserId && !msg.recalled"
             class="recall-btn"
             @click.stop="emit('recallMessage', msg.id)"
             title="撤回"
           >↙</button>
-          <button class="reply-btn" @click.stop="emit('replyMessage', { id: msg.id, sender: msg.sender, content: msg.content })" title="回复">↩</button>
+          <button class="reply-btn" @click.stop="emit('replyMessage', { id: msg.id, sender: msg.sender, content: msg.content, isBotMessage: msg.isBotMessage, botId: msg.botId })" title="回复">↩</button>
         </div>
         <!-- 引用消息显示 -->
         <div v-if="msg.replyToId" class="reply-quote">
@@ -70,7 +75,7 @@ const emit = defineEmits<{
           v-else
           class="message-content"
           :class="{ 'image-content': msg.contentType === 'image' }"
-          :style="msg.senderId !== currentUserId ? {
+          :style="!msg.isBotMessage && msg.senderId !== currentUserId ? {
             backgroundColor: getMessageBackgroundColor(msg.senderId),
             color: '#ffffff'
           } : {}"
@@ -83,6 +88,7 @@ const emit = defineEmits<{
             @click="emit('openImagePreview', msg.content)"
             @error="(e) => { const target = e.target as HTMLImageElement; if (target) target.style.display = 'none' }"
           />
+          <MarkdownRender v-else-if="msg.isBotMessage" :content="msg.content" />
           <span v-else>{{ msg.content }}</span>
         </div>
       </div>
@@ -104,7 +110,8 @@ const emit = defineEmits<{
   display: flex;
   flex-direction: column;
   gap: 18px;
-  min-height: min-content;
+  min-height: 0;
+  width: 100%;
 }
 
 .message {
@@ -272,7 +279,11 @@ const emit = defineEmits<{
   font-size: 12px;
   overflow: hidden;
   text-overflow: ellipsis;
-  white-space: nowrap;
+  max-width: 300px;
+  display: -webkit-box;
+  -webkit-line-clamp: 2;
+  -webkit-box-orient: vertical;
+  line-clamp: 2;
 }
 
 .sender {
@@ -297,9 +308,10 @@ const emit = defineEmits<{
   word-break: break-word;
   box-shadow: 0 2px 12px rgba(0, 0, 0, 0.08);
   display: inline-block;
-  max-width: 100%;
+  max-width: calc(100% - 100px);
   width: fit-content;
-  min-width: 0;
+  min-width: 60px;
+  max-width: 600px;
   white-space: pre-wrap;
   overflow: hidden;
   box-sizing: border-box;
@@ -365,5 +377,36 @@ const emit = defineEmits<{
     max-height: 250px;
   }
 }
-</style>
 
+/* 机器人消息样式 */
+.message.bot-message .message-content {
+  background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
+  color: white;
+  border-bottom-left-radius: 6px;
+  border: none;
+  max-width: calc(100% - 100px);
+  max-width: 600px;
+  padding: 12px 16px;
+  min-width: 80px;
+}
+
+@media (min-width: 769px) {
+  .message.bot-message {
+    max-width: 82%;
+  }
+
+  .message.bot-message .message-content {
+    max-width: min(920px, calc(100vw - 420px));
+    width: 100%;
+  }
+}
+
+.message.bot-message .sender {
+  color: #667eea;
+}
+
+.message.bot-message .message-avatar {
+  background: linear-gradient(135deg, #667eea, #764ba2);
+  box-shadow: 0 4px 12px rgba(102, 126, 234, 0.3);
+}
+</style>

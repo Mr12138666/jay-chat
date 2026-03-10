@@ -59,4 +59,9 @@ public interface UserMapper {
      * 更新上次发言时间
      */
     int updateLastMessageAt(@Param("id") Long id);
+
+    /**
+     * 批量查询用户
+     */
+    List<User> selectByIds(@Param("ids") List<Long> ids);
 }

@@ -3,6 +3,7 @@ import { ref, watch, computed } from 'vue'
 import type { ChatSession, SessionMember } from '../../api/chat'
 import { updateGroupInfo, inviteMembers, removeMember, leaveGroup, dissolveGroup, transferOwner } from '../../api/chat'
 import { getUsers, type ContactUser } from '../../api/chat'
+import AddBotModal from './AddBotModal.vue'
 
 const props = defineProps<{
   show: boolean
@@ -18,7 +19,10 @@ const emit = defineEmits<{
 }>()
 
 const loading = ref(false)
-const activeTab = ref<'info' | 'members' | 'invite'>('info')
+const activeTab = ref<'info' | 'members' | 'invite' | 'bots'>('info')
+
+// AI 机器人管理
+const showAddBotModal = ref(false)
 
 // 编辑群信息
 const editGroupName = ref('')
@@ -179,6 +183,10 @@ const doTransferOwner = async (newOwnerId: number) => {
           :class="{ active: activeTab === 'invite' }"
           @click="switchToInvite"
         >邀请成员</button>
+        <button
+          :class="{ active: activeTab === 'bots' }"
+          @click="activeTab = 'bots'"
+        >AI 机器人</button>
       </div>
 
       <div class="modal-body">
@@ -260,9 +268,25 @@ const doTransferOwner = async (newOwnerId: number) => {
             </button>
           </div>
         </div>
+
+        <!-- AI 机器人 -->
+        <div v-if="activeTab === 'bots'" class="tab-content">
+          <div class="bot-manage-section">
+            <p class="bot-intro">管理群聊中的 AI 机器人，添加后可在群聊中 @机器人 进行对话</p>
+            <button class="btn-primary" @click="showAddBotModal = true">管理 AI 机器人</button>
+          </div>
+        </div>
       </div>
     </div>
   </div>
+
+  <!-- 添加机器人弹窗 -->
+  <AddBotModal
+    :show="showAddBotModal"
+    :session-id="session?.id ?? null"
+    @close="showAddBotModal = false"
+    @update="emit('update')"
+  />
 </template>
 
 <style scoped>
@@ -549,5 +573,20 @@ const doTransferOwner = async (newOwnerId: number) => {
   text-align: center;
   color: #999;
   padding: 20px;
+}
+
+.bot-manage-section {
+  text-align: center;
+  padding: 20px 0;
+}
+
+.bot-intro {
+  color: #666;
+  font-size: 14px;
+  margin-bottom: 16px;
+}
+
+.bot-manage-section .btn-primary {
+  width: 100%;
 }
 </style>

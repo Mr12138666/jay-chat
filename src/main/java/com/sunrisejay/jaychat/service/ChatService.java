@@ -9,9 +9,11 @@ import com.sunrisejay.jaychat.dto.request.MessageRequest;
 import com.sunrisejay.jaychat.dto.response.MessageResponse;
 import com.sunrisejay.jaychat.dto.response.SessionMemberResponse;
 import com.sunrisejay.jaychat.dto.response.SessionMemberStatsResponse;
+import com.sunrisejay.jaychat.entity.AIBot;
 import com.sunrisejay.jaychat.entity.ChatMessage;
 import com.sunrisejay.jaychat.entity.ChatSession;
 import com.sunrisejay.jaychat.entity.User;
+import com.sunrisejay.jaychat.mapper.AIBotMapper;
 import com.sunrisejay.jaychat.mapper.ChatMessageMapper;
 import com.sunrisejay.jaychat.mapper.ChatSessionMapper;
 import com.sunrisejay.jaychat.mapper.ChatSessionMemberMapper;
@@ -23,7 +25,9 @@ import org.springframework.transaction.annotation.Transactional;
 
 import java.time.LocalDateTime;
 import java.time.temporal.ChronoUnit;
+import java.util.Collections;
 import java.util.List;
+import java.util.Map;
 import java.util.Set;
 import java.util.stream.Collectors;
 
@@ -45,6 +49,7 @@ public class ChatService {
     private final ChatSessionMapper sessionMapper;
     private final ChatSessionMemberMapper memberMapper;
     private final UserMapper userMapper;
+    private final AIBotMapper aiBotMapper;
     private final OnlineUserService onlineUserService;
     private final MessageConverter messageConverter;
     private final EmojiUtil emojiUtil;
@@ -53,6 +58,7 @@ public class ChatService {
                        ChatSessionMapper sessionMapper,
                        ChatSessionMemberMapper memberMapper,
                        UserMapper userMapper,
+                       AIBotMapper aiBotMapper,
                        OnlineUserService onlineUserService,
                        MessageConverter messageConverter,
                        EmojiUtil emojiUtil) {
@@ -60,6 +66,7 @@ public class ChatService {
         this.sessionMapper = sessionMapper;
         this.memberMapper = memberMapper;
         this.userMapper = userMapper;
+        this.aiBotMapper = aiBotMapper;
         this.onlineUserService = onlineUserService;
         this.messageConverter = messageConverter;
         this.emojiUtil = emojiUtil;
@@ -117,6 +124,36 @@ public class ChatService {
     }
 
     /**
+     * 保存机器人最终回复为标准消息
+     */
+    @Transactional
+    public MessageResponse saveBotFinalMessage(Long sessionId, Long botId, String content) {
+        ChatSession session = sessionMapper.selectById(sessionId);
+        if (session == null) {
+            throw new BusinessException("会话不存在");
+        }
+
+        AIBot bot = aiBotMapper.selectById(botId);
+        if (bot == null) {
+            throw new BusinessException("机器人不存在");
+        }
+
+        ChatMessage message = new ChatMessage();
+        message.setSessionId(sessionId);
+        // 复用 senderId 字段承载 bot 标识，botId 字段用于前端明确区分机器人消息
+        message.setSenderId(botId);
+        message.setBotId(botId);
+        message.setContent(content);
+        message.setContentType("text");
+        message.setReplyToId(null);
+        messageMapper.insert(message);
+
+        MessageResponse response = messageConverter.toResponse(message);
+        response.setSenderNickname(bot.getName());
+        return response;
+    }
+
+    /**
      * 获取会话消息历史
      */
     public List<MessageResponse> getMessages(Long sessionId, Integer page, Integer pageSize) {
@@ -131,9 +168,39 @@ public class ChatService {
         int offset = (page - 1) * pageSize;
         List<ChatMessage> messages = messageMapper.selectBySessionId(sessionId, pageSize, offset);
 
+        if (messages.isEmpty()) {
+            return Collections.emptyList();
+        }
+
+        // 批量查询用户和机器人信息，避免 N+1 查询
+        List<Long> userIds = messages.stream()
+                .filter(msg -> msg.getBotId() == null)
+                .map(ChatMessage::getSenderId)
+                .distinct()
+                .collect(Collectors.toList());
+        List<Long> botIds = messages.stream()
+                .filter(msg -> msg.getBotId() != null)
+                .map(ChatMessage::getBotId)
+                .distinct()
+                .collect(Collectors.toList());
+
+        Map<Long, User> userMap = userIds.isEmpty() ? Collections.emptyMap() :
+                userMapper.selectByIds(userIds).stream()
+                        .collect(Collectors.toMap(User::getId, u -> u));
+        Map<Long, AIBot> botMap = botIds.isEmpty() ? Collections.emptyMap() :
+                aiBotMapper.selectByIds(botIds).stream()
+                        .collect(Collectors.toMap(AIBot::getId, b -> b));
+
         return messages.stream()
                 .map(msg -> {
-                    User user = userMapper.selectById(msg.getSenderId());
+                    if (msg.getBotId() != null) {
+                        AIBot bot = botMap.get(msg.getBotId());
+                        MessageResponse response = messageConverter.toResponse(msg);
+                        response.setSenderNickname(bot != null ? bot.getName() : "AI 助手");
+                        return response;
+                    }
+
+                    User user = userMap.get(msg.getSenderId());
                     return messageConverter.toResponse(msg, user);
                 })
                 .collect(Collectors.toList());

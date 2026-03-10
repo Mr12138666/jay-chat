@@ -17,12 +17,12 @@ import java.util.List;
 @Mapper
 public interface ChatMessageMapper {
 
-    @Insert("INSERT INTO chat_message (session_id, sender_id, content, content_type, reply_to_id, is_recalled, sent_at) " +
-            "VALUES (#{sessionId}, #{senderId}, #{content}, #{contentType}, #{replyToId}, 0, NOW())")
+    @Insert("INSERT INTO chat_message (session_id, sender_id, bot_id, content, content_type, reply_to_id, is_recalled, sent_at) " +
+            "VALUES (#{sessionId}, #{senderId}, #{botId}, #{content}, #{contentType}, #{replyToId}, 0, NOW())")
     @Options(useGeneratedKeys = true, keyProperty = "id")
     int insert(ChatMessage message);
 
-    @Select("SELECT id, session_id as sessionId, sender_id as senderId, content, " +
+    @Select("SELECT id, session_id as sessionId, sender_id as senderId, bot_id as botId, content, " +
             "content_type as contentType, reply_to_id as replyToId, is_recalled as isRecalled, sent_at as sentAt " +
             "FROM chat_message WHERE session_id = #{sessionId} " +
             "ORDER BY sent_at DESC LIMIT #{limit} OFFSET #{offset}")
@@ -30,7 +30,7 @@ public interface ChatMessageMapper {
                                         @Param("limit") Integer limit,
                                         @Param("offset") Integer offset);
 
-    @Select("SELECT id, session_id as sessionId, sender_id as senderId, content, " +
+    @Select("SELECT id, session_id as sessionId, sender_id as senderId, bot_id as botId, content, " +
             "content_type as contentType, reply_to_id as replyToId, is_recalled as isRecalled, sent_at as sentAt " +
             "FROM chat_message WHERE id = #{id}")
     ChatMessage selectById(@Param("id") Long id);

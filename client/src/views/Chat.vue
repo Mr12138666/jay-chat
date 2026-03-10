@@ -1,5 +1,5 @@
 <script setup lang="ts">
-import { ref, computed, onMounted, onUnmounted } from 'vue'
+import { ref, computed, onMounted, onUnmounted, nextTick } from 'vue'
 import { useRouter } from 'vue-router'
 import type { UserInfo, UserDetail } from '../api/auth'
 import { updateNickname, getUserDetail, uploadAvatar } from '../api/auth'
@@ -29,7 +29,9 @@ import MembersModal from '../components/chat/MembersModal.vue'
 import ChatMessageList from '../components/chat/ChatMessageList.vue'
 import ChatComposer from '../components/chat/ChatComposer.vue'
 import GroupSettings from '../components/chat/GroupSettings.vue'
+import AIBotManage from '../components/chat/AIBotManage.vue'
 import { validateAvatarFile, withCacheBuster } from '../utils/avatar'
+import { getBot, getSessionBots, type AIBot } from '../api/aiBot'
 import { useChatMessages } from '../composables/useChatMessages'
 
 const router = useRouter()
@@ -51,6 +53,12 @@ const showUserDetail = ref(false)
 const viewingUserId = ref<number | null>(null)
 const userDetail = ref<UserDetail | null>(null)
 const loadingUserDetail = ref(false)
+
+const showBotDetail = ref(false)
+const viewingBotId = ref<number | null>(null)
+const botDetail = ref<AIBot | null>(null)
+const loadingBotDetail = ref(false)
+
 const showEditNickname = ref(false)
 const newNickname = ref('')
 const updatingNickname = ref(false)
@@ -62,9 +70,13 @@ const members = ref<SessionMember[]>([])
 const memberStats = ref<SessionMemberStats | null>(null)
 const onlineUserIds = ref<Set<number>>(new Set())
 const loadingMembers = ref(false)
+const sessionMentionBots = ref<AIBot[]>([])
 
 // 群设置相关
 const showGroupSettings = ref(false)
+const showAIBotManage = ref(false)
+
+// 机器人消息缓冲
 const currentGroupInfo = ref<ChatSession | null>(null)
 
 // 创建群聊相关
@@ -213,6 +225,7 @@ const loadSessions = async () => {
       // 更新 WebSocket 服务的当前会话ID
       wsService.setCurrentSessionId(defaultSession.id)
       await loadMessages(defaultSession.id)
+      await loadSessionMentionBots(defaultSession.id)
     }
   } catch (error: any) {
     console.error('加载会话列表失败:', error)
@@ -234,6 +247,7 @@ const loadSessions = async () => {
       currentSessionId.value = defaultSession.id
       wsService.setCurrentSessionId(defaultSession.id)
       await loadMessages(defaultSession.id)
+      await loadSessionMentionBots(defaultSession.id)
       if (wsConnected.value || wsService.isConnected()) {
         const allSessionIds = sessions.value.map(s => s.id)
         wsService.subscribeToAllSessions(allSessionIds, handleWsMessage)
@@ -243,6 +257,25 @@ const loadSessions = async () => {
       showError('无法加载会话，请检查网络连接或刷新页面')
     }
   }
+}
+
+const loadSessionMentionBots = async (sessionId: number) => {
+  try {
+    sessionMentionBots.value = await getSessionBots(sessionId)
+  } catch (error) {
+    console.error('加载会话机器人列表失败:', error)
+    sessionMentionBots.value = []
+  }
+}
+
+const insertBotMention = (botName: string) => {
+  const mention = `@${botName}`
+  const current = inputMessage.value.trim()
+  inputMessage.value = current ? `${current} ${mention} ` : `${mention} `
+  nextTick(() => {
+    const inputEl = document.querySelector('.message-input') as HTMLInputElement | null
+    inputEl?.focus()
+  })
 }
 
 // 获取会话显示名称（私人会话显示对方昵称）
@@ -258,6 +291,17 @@ const getSessionDisplayName = (session: ChatSession): string => {
     return '单聊'
   }
   return '群聊'
+}
+
+// 获取会话头像
+const getSessionAvatar = (session: ChatSession): string | null => {
+  if (session.type === 'private') {
+    const otherMember = privateSessionMembers.value.get(session.id)
+    if (otherMember) {
+      return otherMember.avatar || null
+    }
+  }
+  return null
 }
 
 // 获取会话未读数量
@@ -342,6 +386,14 @@ const switchSession = async (sessionId: number) => {
   }
 
   await loadMessages(sessionId)
+  await loadSessionMentionBots(sessionId)
+
+  // 切会话时清理流式状态，避免跨会话映射残留
+  pendingBotMessages.clear()
+  latestBotMessageIndex.clear()
+
+  // bot 消息由后端历史接口统一返回，这里不再做本地恢复
+
   // 订阅所有会话的消息（保持对所有会话的订阅，以便显示未读红点）
   if (wsConnected.value || wsService.isConnected()) {
     const allSessionIds = sessions.value.map(s => s.id)
@@ -426,6 +478,29 @@ const closeUserDetail = () => {
   viewingUserId.value = null
   userDetail.value = null
   showEditNickname.value = false
+}
+
+// 打开机器人详情弹窗
+const openBotDetail = async (botId: number) => {
+  viewingBotId.value = botId
+  showBotDetail.value = true
+  loadingBotDetail.value = true
+
+  try {
+    botDetail.value = await getBot(botId)
+  } catch (error: any) {
+    showError(handleApiError(error))
+    closeBotDetail()
+  } finally {
+    loadingBotDetail.value = false
+  }
+}
+
+// 关闭机器人详情弹窗
+const closeBotDetail = () => {
+  showBotDetail.value = false
+  viewingBotId.value = null
+  botDetail.value = null
 }
 
 // 打开修改昵称弹窗（在详情弹窗内）
@@ -644,13 +719,354 @@ const doCreateGroup = async () => {
   }
 }
 
-// 包装消息处理函数，区分普通消息和撤回消息
-const handleWsMessage = (message: import('../utils/websocket').ChatMessage) => {
-  if (message.recalled) {
-    handleRecallMessage(message)
-  } else {
-    handleMessage(message)
+// 跟踪每个 bot 最近一次流式消息的位置，用于把持久化最终消息覆盖到同一气泡
+const latestBotMessageIndex = new Map<number, number>()
+
+const handlePersistedBotMessage = (message: import('../utils/websocket').ChatMessage): boolean => {
+  const botId = Number(message.botId)
+  if (!botId) return false
+
+  // 已存在相同最终消息ID，直接忽略
+  if (message.id && messages.value.some(msg => msg.id === message.id)) {
+    return true
   }
+
+  const senderName = message.senderNickname || `AI 助手${botId}`
+  const finalContent = message.contentType === 'image' ? message.content : String(message.content || '')
+
+  const applyFinalToIndex = (idx: number): boolean => {
+    const target = messages.value[idx]
+    if (!target || !target.isBotMessage || target.botId !== botId) return false
+
+    target.id = message.id || target.id
+    target.sender = senderName
+    target.content = finalContent
+    target.time = formatTime(message.sentAt)
+    target.sentAtRaw = message.sentAt
+    target.senderId = message.senderId
+    target.senderAvatar = null
+    target.contentType = message.contentType || 'text'
+    target.replyToId = message.replyToId
+    target.replyToNickname = message.replyToNickname
+    target.replyToContent = message.replyToContent
+    target.recalled = message.recalled
+    target.streaming = false
+    return true
+  }
+
+  // 1) 优先用最近流式索引覆盖（稳定消除“第二条”）
+  const preferredIndex = latestBotMessageIndex.get(botId)
+  if (typeof preferredIndex === 'number' && applyFinalToIndex(preferredIndex)) {
+    nextTick(() => scrollToBottom(true))
+    return true
+  }
+
+  // 2) 兜底：从后往前找最近同 bot 的消息覆盖
+  for (let i = messages.value.length - 1; i >= 0; i--) {
+    if (applyFinalToIndex(i)) {
+      latestBotMessageIndex.set(botId, i)
+      nextTick(() => scrollToBottom(true))
+      return true
+    }
+  }
+
+  return false
+}
+
+const handleBotMessageFinal = (message: any) => {
+  const msgSessionId = Number(message.sessionId)
+  if (!currentSessionId.value || msgSessionId !== currentSessionId.value) {
+    return
+  }
+
+  const botId = Number(message.botId)
+  const requestId = typeof message.requestId === 'string' ? message.requestId : undefined
+  const streamKey = requestId ? `req:${requestId}` : `bot:${botId}`
+  const pending = pendingBotMessages.get(streamKey)
+
+  const senderName = message.senderNickname || message.botName || `AI 助手${botId}`
+  const finalContent = message.contentType === 'image' ? message.content : String(message.content || '')
+
+  const applyFinal = (idx: number): boolean => {
+    const target = messages.value[idx]
+    if (!target || !target.isBotMessage || target.botId !== botId) return false
+
+    target.id = message.id || target.id
+    target.sender = senderName
+    target.content = finalContent
+    target.time = formatTime(message.sentAt)
+    target.sentAtRaw = message.sentAt
+    target.senderId = Number(message.senderId || botId)
+    target.senderAvatar = null
+    target.contentType = message.contentType || 'text'
+    target.replyToId = message.replyToId
+    target.replyToNickname = message.replyToNickname
+    target.replyToContent = message.replyToContent
+    target.recalled = message.recalled
+    target.streaming = false
+    return true
+  }
+
+  let applied = false
+  if (pending) {
+    applied = applyFinal(pending.index)
+    if (applied) {
+      latestBotMessageIndex.set(botId, pending.index)
+    }
+  }
+
+  if (!applied) {
+    const preferred = latestBotMessageIndex.get(botId)
+    if (typeof preferred === 'number') {
+      applied = applyFinal(preferred)
+    }
+  }
+
+  if (!applied) {
+    for (let i = messages.value.length - 1; i >= 0; i--) {
+      if (applyFinal(i)) {
+        latestBotMessageIndex.set(botId, i)
+        applied = true
+        break
+      }
+    }
+  }
+
+  if (!applied) {
+    messages.value.push({
+      id: message.id || Date.now() + botId,
+      sender: senderName,
+      content: finalContent,
+      time: formatTime(message.sentAt),
+      sentAtRaw: message.sentAt,
+      senderId: Number(message.senderId || botId),
+      senderAvatar: null,
+      contentType: message.contentType || 'text',
+      isBotMessage: true,
+      botId,
+      requestId,
+      streaming: false
+    })
+    latestBotMessageIndex.set(botId, messages.value.length - 1)
+  }
+
+  pendingBotMessages.delete(streamKey)
+  clearBotChunkDebounce(streamKey)
+  nextTick(() => scrollToBottom(true))
+}
+
+// 包装消息处理函数，区分普通消息和撤回消息和机器人消息
+const handleWsMessage = (message: any) => {
+  if (message.type === 'bot_message') {
+    handleBotMessage(message)
+    return
+  }
+
+  if (message.type === 'bot_message_complete') {
+    handleBotMessageComplete(message)
+    return
+  }
+
+  if (message.type === 'bot_message_error') {
+    handleBotMessageError(message)
+    return
+  }
+
+  if (message.type === 'bot_message_final') {
+    handleBotMessageFinal(message)
+    return
+  }
+
+  const chatMessage = message as import('../utils/websocket').ChatMessage
+
+  // 持久化的 bot 最终消息：覆盖流式气泡，不再追加第二条
+  if (chatMessage.botId) {
+    if (handlePersistedBotMessage(chatMessage)) {
+      return
+    }
+  }
+
+  if (chatMessage.recalled) {
+    handleRecallMessage(chatMessage)
+  } else {
+    handleMessage(chatMessage)
+  }
+}
+
+const resolveBotStreamKey = (message: any): string => {
+  const requestId = message?.requestId
+  if (typeof requestId === 'string' && requestId.trim()) {
+    return `req:${requestId}`
+  }
+  return `bot:${Number(message?.botId)}`
+}
+
+const parseBotChunk = (rawContent: unknown): string => {
+  if (rawContent == null) return ''
+
+  if (typeof rawContent === 'object') {
+    const value = (rawContent as { v?: unknown }).v
+    return typeof value === 'string' ? value : ''
+  }
+
+  if (typeof rawContent !== 'string') {
+    return String(rawContent)
+  }
+
+  const trimmed = rawContent.trim()
+  if (trimmed.startsWith('{') && trimmed.endsWith('}')) {
+    try {
+      const parsed = JSON.parse(trimmed) as { v?: unknown }
+      if (typeof parsed.v === 'string') {
+        return parsed.v
+      }
+    } catch {
+      // 非 JSON 文本，按原始字符串处理
+    }
+  }
+
+  return rawContent
+}
+
+const mergeBotChunk = (lastContent: string, chunk: string) => {
+  if (!chunk) {
+    return { nextContent: lastContent, appendChunk: '' }
+  }
+  if (!lastContent) {
+    return { nextContent: chunk, appendChunk: chunk }
+  }
+  if (chunk === lastContent) {
+    return { nextContent: lastContent, appendChunk: '' }
+  }
+
+  if (chunk.startsWith(lastContent)) {
+    const appendChunk = chunk.slice(lastContent.length)
+    return { nextContent: chunk, appendChunk }
+  }
+
+  if (lastContent.endsWith(chunk)) {
+    return { nextContent: lastContent, appendChunk: '' }
+  }
+
+  const maxOverlap = Math.min(lastContent.length, chunk.length)
+  let overlap = 0
+  for (let i = maxOverlap; i > 0; i--) {
+    if (lastContent.slice(-i) === chunk.slice(0, i)) {
+      overlap = i
+      break
+    }
+  }
+
+  const appendChunk = chunk.slice(overlap)
+  return {
+    nextContent: lastContent + appendChunk,
+    appendChunk
+  }
+}
+
+// 第二阶段：移除 bot 本地持久化，统一依赖后端历史消息
+
+// 跟踪当前正在进行的机器人回复（streamKey -> { index, lastContent, sessionId }）
+const pendingBotMessages = new Map<string, { index: number; lastContent: string; sessionId: number }>()
+
+// 注意：分片去抖可能误伤合法重复字符（如“哈哈”），导致漏字；
+// 当前改为不过滤分片，最终由持久化消息覆盖同一气泡保证内容正确且只显示一条。
+const shouldSkipDuplicateChunk = (_streamKey: string, _chunk: string): boolean => false
+const clearBotChunkDebounce = (_streamKey: string) => {}
+
+const handleBotMessage = (message: any) => {
+  // 确保 sessionId 匹配
+  const msgSessionId = Number(message.sessionId)
+  if (!currentSessionId.value || msgSessionId !== currentSessionId.value) {
+    return
+  }
+
+  const botId = Number(message.botId)
+  const streamKey = resolveBotStreamKey(message)
+  const requestId = typeof message.requestId === 'string' ? message.requestId : undefined
+  const botName = message.botName || 'AI 助手'
+  const content = parseBotChunk(message.content)
+
+  if (shouldSkipDuplicateChunk(streamKey, content)) {
+    return
+  }
+
+  if (pendingBotMessages.has(streamKey)) {
+    const pending = pendingBotMessages.get(streamKey)!
+    const pendingMessage = messages.value[pending.index]
+
+    if (!pendingMessage || !pendingMessage.isBotMessage) {
+      pendingBotMessages.delete(streamKey)
+      clearBotChunkDebounce(streamKey)
+      return
+    }
+
+    const merged = mergeBotChunk(pending.lastContent, content)
+    if (merged.appendChunk) {
+      pendingMessage.content += merged.appendChunk
+      pending.lastContent = merged.nextContent
+      pending.sessionId = msgSessionId
+    }
+  } else {
+    const nowIso = new Date().toISOString()
+    const msgIndex = messages.value.push({
+      id: Date.now() + botId,
+      sender: botName,
+      content,
+      time: formatTime(nowIso),
+      sentAtRaw: nowIso,
+      senderId: botId,
+      senderAvatar: null,
+      contentType: 'text',
+      isBotMessage: true,
+      botId,
+      requestId,
+      streaming: true
+    }) - 1
+
+    pendingBotMessages.set(streamKey, { index: msgIndex, lastContent: content, sessionId: msgSessionId })
+    latestBotMessageIndex.set(botId, msgIndex)
+  }
+
+  // 滚动到底部
+  nextTick(() => scrollToBottom(true))
+}
+
+// 处理机器人消息完成
+const handleBotMessageComplete = (message: any) => {
+  const botId = Number(message.botId)
+  const streamKey = resolveBotStreamKey(message)
+  const pending = pendingBotMessages.get(streamKey)
+
+  if (pending) {
+    const pendingMessage = messages.value[pending.index]
+    if (pendingMessage?.isBotMessage) {
+      pendingMessage.streaming = false
+      latestBotMessageIndex.set(botId, pending.index)
+    }
+  } else {
+    // 兜底：从后往前找最后一条对应 bot 的消息
+    for (let i = messages.value.length - 1; i >= 0; i--) {
+      const msg = messages.value[i]
+      if (msg?.isBotMessage && msg.botId === botId) {
+        msg.streaming = false
+        latestBotMessageIndex.set(botId, i)
+        break
+      }
+    }
+  }
+
+  pendingBotMessages.delete(streamKey)
+  clearBotChunkDebounce(streamKey)
+}
+
+// 处理机器人消息错误
+const handleBotMessageError = (message: any) => {
+  console.error('机器人消息错误:', message?.error)
+  const streamKey = resolveBotStreamKey(message)
+  pendingBotMessages.delete(streamKey)
+  clearBotChunkDebounce(streamKey)
+  showError(message?.error || 'AI 回复失败')
 }
 
 // 加载成员数据
@@ -872,6 +1288,13 @@ onUnmounted(() => {
         <button @click="handleLogout" class="logout-btn">退出</button>
       </div>
 
+      <!-- AI 机器人管理入口 -->
+      <div class="bot-manage-entry">
+        <button @click="showAIBotManage = true" class="bot-manage-btn">
+          🤖 管理我的 AI 机器人
+        </button>
+      </div>
+
       <section class="room-list">
         <div class="tab-header">
           <button
@@ -903,9 +1326,18 @@ onUnmounted(() => {
               :class="{ active: currentSessionId === session.id }"
               @click="switchSession(session.id)"
             >
-              <span class="session-icon">
-                {{ session.type === 'private' ? '👤' : '👥' }}
-              </span>
+              <div class="session-avatar">
+                <img
+                  v-if="getSessionAvatar(session)"
+                  :src="getSessionAvatar(session)!"
+                  :alt="getSessionDisplayName(session)"
+                  class="avatar-img"
+                  @error="(e) => { const target = e.target as HTMLImageElement; if (target) target.style.display = 'none' }"
+                />
+                <div v-else class="avatar-placeholder">
+                  {{ session.type === 'private' ? '👤' : '👥' }}
+                </div>
+              </div>
               <span class="session-name">{{ getSessionDisplayName(session) }}</span>
               <span v-if="getUnreadCount(session.id) > 0" class="unread-badge">
                 {{ getUnreadCount(session.id) > 99 ? '99+' : getUnreadCount(session.id) }}
@@ -1019,6 +1451,7 @@ onUnmounted(() => {
           :messages="messages"
           :current-user-id="currentUser?.id"
           @open-user-detail="openUserDetail"
+          @open-bot-detail="openBotDetail"
           @open-image-preview="openImagePreview"
           @reply-message="setReplyingTo"
           @recall-message="handleRecallMessageClick"
@@ -1035,6 +1468,7 @@ onUnmounted(() => {
         :uploading-image="uploadingImage"
         :show-emoji-picker="showEmojiPicker"
         :replying-to="replyingTo"
+        :mention-bots="sessionMentionBots"
         @send="sendMessage"
         @toggle-emoji="toggleEmojiPicker"
         @close-emoji="closeEmojiPicker"
@@ -1198,6 +1632,12 @@ onUnmounted(() => {
       @kick-member="handleKickMember"
     />
 
+    <!-- AI 机器人管理弹窗 -->
+    <AIBotManage
+      :show="showAIBotManage"
+      @close="showAIBotManage = false"
+    />
+
     <!-- 创建群聊弹窗 -->
     <div v-if="showCreateGroup" class="modal-overlay" @click.self="closeCreateGroup">
       <div class="modal-content">
@@ -1227,6 +1667,67 @@ onUnmounted(() => {
         <div class="modal-footer">
           <button class="btn-primary" @click="doCreateGroup" :disabled="creatingGroup">
             {{ creatingGroup ? '创建中...' : '创建群聊' }}
+          </button>
+        </div>
+      </div>
+    </div>
+
+    <!-- 机器人详情弹窗 -->
+    <div v-if="showBotDetail" class="modal-overlay" @click="closeBotDetail">
+      <div class="modal-content user-detail-modal" @click.stop>
+        <div class="modal-header">
+          <h3>机器人详情</h3>
+          <button @click="closeBotDetail" class="modal-close-btn">×</button>
+        </div>
+        <div class="modal-body user-detail-body">
+          <div v-if="loadingBotDetail" class="loading-detail">加载中...</div>
+          <div v-else-if="botDetail" class="user-detail-content">
+            <div class="detail-avatar-section">
+              <div class="detail-avatar-wrapper">
+                <img
+                  v-if="botDetail.avatar"
+                  :src="botDetail.avatar"
+                  :alt="botDetail.name"
+                  class="detail-avatar-img"
+                  @error="botDetail && (botDetail.avatar = null)"
+                />
+                <div v-else class="detail-avatar-placeholder">
+                  {{ botDetail.name?.[0] || 'B' }}
+                </div>
+              </div>
+            </div>
+
+            <div class="detail-info-section">
+              <div class="detail-info-item">
+                <label>名称</label>
+                <div class="detail-info-value">{{ botDetail.name }}</div>
+              </div>
+
+              <div class="detail-info-item">
+                <label>模型</label>
+                <div class="detail-info-value">{{ botDetail.model }}</div>
+              </div>
+
+              <div class="detail-info-item">
+                <label>描述</label>
+                <div class="detail-info-value">{{ botDetail.description || '暂无描述' }}</div>
+              </div>
+
+              <div class="detail-info-item">
+                <label>系统提示词</label>
+                <div class="detail-info-value" style="white-space: pre-wrap; word-break: break-word;">{{ botDetail.systemPrompt || '暂无提示词' }}</div>
+              </div>
+            </div>
+          </div>
+        </div>
+        <div class="modal-footer">
+          <button @click="closeBotDetail" class="btn-close">关闭</button>
+          <button
+            v-if="botDetail"
+            class="btn-save"
+            @click="insertBotMention(botDetail.name); closeBotDetail()"
+          >
+            @提及
           </button>
         </div>
       </div>
@@ -1463,6 +1964,27 @@ onUnmounted(() => {
   background: rgba(255, 107, 157, 0.2);
 }
 
+.bot-manage-entry {
+  padding: 0 16px 16px;
+}
+
+.bot-manage-btn {
+  width: 100%;
+  padding: 10px 14px;
+  background: linear-gradient(135deg, #667eea, #764ba2);
+  color: white;
+  border: none;
+  border-radius: var(--radius-md);
+  font-size: 13px;
+  cursor: pointer;
+  transition: all 0.2s;
+}
+
+.bot-manage-btn:hover {
+  opacity: 0.9;
+  transform: translateY(-1px);
+}
+
 /* 会话列表 */
 .room-list {
   flex: 1;
@@ -1501,9 +2023,32 @@ onUnmounted(() => {
   box-shadow: 0 4px 16px rgba(255, 107, 157, 0.3);
 }
 
-/* 会话图标 */
-.session-icon {
-  margin-right: 10px;
+/* 会话头像 */
+.session-avatar {
+  width: 40px;
+  height: 40px;
+  border-radius: var(--radius-md);
+  flex-shrink: 0;
+  overflow: hidden;
+  background: linear-gradient(135deg, #ff6b9d 0%, #ff9f43 100%);
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  box-shadow: 0 2px 8px rgba(255, 107, 157, 0.3);
+}
+
+.session-avatar .avatar-img {
+  width: 100%;
+  height: 100%;
+  object-fit: cover;
+}
+
+.session-avatar .avatar-placeholder {
+  width: 100%;
+  height: 100%;
+  display: flex;
+  align-items: center;
+  justify-content: center;
   font-size: 18px;
 }
 
@@ -1626,51 +2171,32 @@ onUnmounted(() => {
   color: var(--text-light);
 }
 
-.loading-contacts {
-  text-align: center;
-  padding: 20px;
-  color: var(--text-light);
-  font-size: 14px;
-}
-
 /* 联系人列表 */
 .contact-item {
   display: flex;
   align-items: center;
-  padding: 14px 20px;
+  gap: 12px;
+  padding: 12px 16px;
+;
   cursor: pointer;
-  transition: all 0.2s;
+  transition: background-color 0.2s;
 }
 
 .contact-item:hover {
-  background: rgba(255, 255, 255, 0.6);
-}
-
-.contact-item .contact-name {
-  font-size: 15px;
-  font-weight: 600;
-  color: var(--text-primary);
-}
-
-.contact-item .contact-username {
-  font-size: 13px;
-  color: var(--text-light);
+  background: rgba(255, 107, 157, 0.08);
 }
 
 .contact-avatar {
   width: 44px;
   height: 44px;
   border-radius: var(--radius-md);
-  background: linear-gradient(135deg, #4ecdc4, #44a08d);
+  flex-shrink: 0;
+  overflow: hidden;
+  background: linear-gradient(135deg, #ff6b9d 0%, #ff9f43 100%);
   display: flex;
   align-items: center;
   justify-content: center;
-  font-weight: bold;
-  color: white;
-  flex-shrink: 0;
-  overflow: hidden;
-  margin-right: 14px;
-  box-shadow: 0 4px 12px rgba(78, 205, 196, 0.3);
+  box-shadow: 0 4px 12px rgba(255, 107, 157, 0.3);
 }
 
 .contact-avatar .avatar-img {
@@ -1685,49 +2211,49 @@ onUnmounted(() => {
   display: flex;
   align-items: center;
   justify-content: center;
+  background: linear-gradient(135deg, #4ecdc4, #44a08d);
+  color: white;
+  font-weight: 600;
+  font-size: 16px;
 }
 
 .contact-info {
   flex: 1;
   min-width: 0;
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
 }
 
 .contact-name {
-  font-size: 14px;
   font-weight: 600;
   color: var(--text-primary);
-  white-space: nowrap;
+  font-size: 14px;
   overflow: hidden;
   text-overflow: ellipsis;
+  white-space: nowrap;
 }
 
 .contact-username {
-  font-size: 12px;
   color: var(--text-light);
-  white-space: nowrap;
+  font-size: 12px;
   overflow: hidden;
   text-overflow: ellipsis;
+  white-space: nowrap;
 }
 
-.empty-sessions {
-  padding: 30px 20px;
-  text-align: center;
-  color: var(--text-light);
-  font-size: 14px;
-}
-
-/* 聊天区域 */
+/* 聊天区域（基础布局，避免消息区把输入区顶出视口） */
 .chat {
   flex: 1;
+  min-width: 0;
+  min-height: 0;
   display: flex;
   flex-direction: column;
   background: rgba(255, 255, 255, 0.5);
   backdrop-filter: blur(10px);
   position: relative;
-  min-width: 0;
 }
 
-/* 聊天头部 */
 .chat-header {
   padding: 20px 24px;
   border-bottom: 1px solid rgba(0, 0, 0, 0.05);
@@ -1760,23 +2286,9 @@ onUnmounted(() => {
   gap: 8px;
 }
 
-.status-dot {
-  width: 8px;
-  height: 8px;
-  border-radius: 50%;
-  background: var(--text-light);
-  display: inline-block;
-  transition: all 0.3s;
-}
-
-.status-dot.connected {
-  background: #4ecdc4;
-  box-shadow: 0 0 8px rgba(78, 205, 196, 0.5);
-}
-
-/* 聊天消息区域 */
 .chat-messages {
   flex: 1;
+  min-height: 0;
   overflow-y: auto;
   overflow-x: hidden;
   padding: 24px;
@@ -1787,7 +2299,6 @@ onUnmounted(() => {
   -webkit-overflow-scrolling: touch;
 }
 
-/* 响应式 */
 @media (min-width: 769px) {
   .chat-messages {
     padding: 28px;

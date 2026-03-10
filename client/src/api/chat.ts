@@ -15,6 +15,7 @@ export interface MessageResponse {
   id: number
   sessionId: number
   senderId: number
+  botId?: number
   senderNickname?: string
   content: string
   contentType: string

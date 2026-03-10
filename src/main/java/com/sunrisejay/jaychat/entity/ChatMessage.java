@@ -16,6 +16,11 @@ public class ChatMessage {
 
     private Long senderId;
 
+    /**
+     * AI 机器人ID（普通用户消息为 null）
+     */
+    private Long botId;
+
     private String content;
 
     /**
