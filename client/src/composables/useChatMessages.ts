@@ -133,7 +133,7 @@ export const useChatMessages = ({
       ...replyInfo
     })
 
-    // 滚动到底部
+    // 滚动到底部（强制滚动，确保看到自己发送的消息）
     nextTick(() => {
       scrollToBottom(true)
     })

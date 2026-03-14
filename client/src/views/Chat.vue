@@ -41,6 +41,36 @@ const sessions = ref<ChatSession[]>([])
 const currentSessionId = ref<number | null>(null)
 const wsConnected = ref(false)
 const messagesContainer = ref<HTMLElement | null>(null)
+const isAtBottom = ref(true) // 标记用户是否在消息底部
+let userScrolledAway = false // 标记用户是否主动向上滚动了
+let isUserScrolling = false // 标记用户是否正在滚动
+let scrollTimeout: ReturnType<typeof setTimeout> | null = null
+
+// 检测用户是否在消息底部
+const checkIsAtBottom = () => {
+  if (!messagesContainer.value) return
+  const container = messagesContainer.value
+  // 距离底部 50px 以内认为在底部
+  const distanceToBottom = container.scrollHeight - container.scrollTop - container.clientHeight
+  const wasAtBottom = isAtBottom.value
+  isAtBottom.value = distanceToBottom <= 50
+
+  // 用户正在滚动
+  isUserScrolling = true
+  if (scrollTimeout) clearTimeout(scrollTimeout)
+  scrollTimeout = setTimeout(() => {
+    isUserScrolling = false
+  }, 150)
+
+  // 如果用户从底部向上滚了，设置标记
+  if (!isAtBottom.value && wasAtBottom) {
+    userScrolledAway = true
+  }
+  // 如果用户滚动回底部，清除标记
+  if (isAtBottom.value) {
+    userScrolledAway = false
+  }
+}
 const showSidebar = ref(false)
 
 // 联系人列表相关
@@ -93,8 +123,26 @@ const privateSessionMembers = ref<Map<number, ContactUser>>(new Map())
 // 未读消息数量 (sessionId -> count)
 const unreadCounts = ref<Map<number, number>>(new Map())
 
-const scrollToBottom = (smooth = false) => {
+// 智能滚动到底部：只在用户位于底部时才自动滚动
+const scrollToBottom = (smooth = false, force = false) => {
+  console.log('scrollToBottom called:', { smooth, force, userScrolledAway, isAtBottom: isAtBottom.value, isUserScrolling })
   if (!messagesContainer.value) return
+  // 如果用户正在滚动，不滚动
+  if (isUserScrolling) {
+    console.log('scrollToBottom skipped: isUserScrolling')
+    return
+  }
+  // 如果用户已经主动向上滚动了，且不是强制滚动，则不滚动
+  if (!force && userScrolledAway) {
+    console.log('scrollToBottom skipped: userScrolledAway')
+    return
+  }
+  // 如果不是强制滚动，且用户不在底部，则不滚动
+  if (!force && !isAtBottom.value) {
+    console.log('scrollToBottom skipped: not at bottom')
+    return
+  }
+  console.log('scrollToBottom executing!')
   if (smooth) {
     messagesContainer.value.scrollTo({
       top: messagesContainer.value.scrollHeight,
@@ -336,7 +384,7 @@ const searchContacts = async () => {
 // 打开联系人面板
 const openContacts = async () => {
   showContacts.value = true
-  showSidebar.value = false
+  showSidebar.value = true
   await loadContacts()
 }
 
@@ -373,6 +421,10 @@ const switchSession = async (sessionId: number) => {
 
   // 停止旧会话的统计刷新
   stopMemberStatsRefresh()
+
+  // 重置滚动状态
+  userScrolledAway = false
+  isUserScrolling = false
 
   currentSessionId.value = sessionId
   wsService.setCurrentSessionId(sessionId)
@@ -1028,8 +1080,10 @@ const handleBotMessage = (message: any) => {
     latestBotMessageIndex.set(botId, msgIndex)
   }
 
-  // 滚动到底部
-  nextTick(() => scrollToBottom(true))
+  // 只在创建新消息时滚动到底部，更新现有消息时不滚动
+  if (!pendingBotMessages.has(streamKey)) {
+    nextTick(() => scrollToBottom(true))
+  }
 }
 
 // 处理机器人消息完成
@@ -1166,6 +1220,11 @@ onMounted(async () => {
   
   // 添加窗口大小变化监听
   window.addEventListener('resize', handleResize)
+
+  // 添加滚动事件监听，检测用户是否在底部
+  if (messagesContainer.value) {
+    messagesContainer.value.addEventListener('scroll', checkIsAtBottom)
+  }
   
   // 更新当前用户信息
   currentUser.value = user
@@ -1231,6 +1290,10 @@ onMounted(async () => {
 onUnmounted(() => {
   // 移除窗口大小变化监听
   window.removeEventListener('resize', handleResize)
+  // 移除滚动事件监听
+  if (messagesContainer.value) {
+    messagesContainer.value.removeEventListener('scroll', checkIsAtBottom)
+  }
   // 停止成员统计刷新
   stopMemberStatsRefresh()
   // 断开 WebSocket 连接
@@ -1433,10 +1496,10 @@ onUnmounted(() => {
           <p class="chat-subtitle">
             <span class="status-dot" :class="{ 'connected': wsConnected }"></span>
             {{ wsConnected ? '已连接' : '连接中...' }}
-          </p>
-          <p v-if="getCurrentSessionStats()" class="online-count">
-            <span class="online-dot"></span>
-            {{ getCurrentSessionStats()?.onlineMembers || 0 }}
+            <span v-if="getCurrentSessionStats()" class="online-info">
+              <span class="online-dot"></span>
+              {{ getCurrentSessionStats()?.onlineMembers || 0 }} 人在线
+            </span>
           </p>
         </div>
       </header>
@@ -2286,6 +2349,13 @@ onUnmounted(() => {
   gap: 8px;
 }
 
+.online-info {
+  display: flex;
+  align-items: center;
+  gap: 4px;
+  margin-left: 8px;
+}
+
 .chat-messages {
   flex: 1;
   min-height: 0;
@@ -2340,6 +2410,77 @@ onUnmounted(() => {
 
   .sidebar.sidebar-open {
     transform: translateX(0);
+  }
+
+  /* 手机端头部紧凑显示 */
+  .chat-header {
+    padding: 12px 16px;
+  }
+
+  .chat-header h2 {
+    font-size: 16px;
+  }
+
+  .chat-subtitle {
+    font-size: 11px;
+  }
+
+  .online-info {
+    font-size: 10px;
+  }
+
+  .chat-header .members-btn {
+    padding: 4px;
+  }
+
+  .chat-header .members-btn svg {
+    width: 16px;
+    height: 16px;
+  }
+
+  /* 手机端消息区域紧凑显示 */
+  .chat-messages {
+    padding: 12px;
+    gap: 10px;
+  }
+
+  /* 手机端消息列表缩小 */
+  .messages-list {
+    gap: 10px;
+  }
+
+  .message {
+    gap: 8px;
+  }
+
+  .message-avatar {
+    width: 32px;
+    height: 32px;
+  }
+
+  .avatar-placeholder {
+    font-size: 12px;
+  }
+
+  .sender {
+    font-size: 12px;
+  }
+
+  .time {
+    font-size: 10px;
+  }
+
+  .message-content {
+    padding: 8px 12px;
+    font-size: 13px;
+  }
+
+  .message-body {
+    gap: 4px;
+  }
+
+  .message-meta {
+    gap: 6px;
   }
 
   .chat {

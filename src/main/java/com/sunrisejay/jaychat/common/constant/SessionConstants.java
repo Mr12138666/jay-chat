@@ -23,4 +23,19 @@ public final class SessionConstants {
      * 会话类型：私聊
      */
     public static final String SESSION_TYPE_PRIVATE = "private";
+
+    /**
+     * 消息类型：文本
+     */
+    public static final String CONTENT_TYPE_TEXT = "text";
+
+    /**
+     * 消息类型：图片
+     */
+    public static final String CONTENT_TYPE_IMAGE = "image";
+
+    /**
+     * AI机器人默认系统提示词
+     */
+    public static final String AI_BOT_DEFAULT_PROMPT = "你是一个AI助手";
 }

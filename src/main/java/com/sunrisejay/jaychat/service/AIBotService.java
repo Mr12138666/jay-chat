@@ -1,5 +1,6 @@
 package com.sunrisejay.jaychat.service;
 
+import com.sunrisejay.jaychat.common.constant.SessionConstants;
 import com.sunrisejay.jaychat.common.exception.BusinessException;
 import com.sunrisejay.jaychat.dto.request.AIBotRequest;
 import com.sunrisejay.jaychat.dto.response.AIBotResponse;
@@ -220,7 +221,7 @@ public class AIBotService {
         // 使用机器人的系统提示词
         String systemPrompt = bot.getSystemPrompt();
         if (systemPrompt == null || systemPrompt.trim().isEmpty()) {
-            systemPrompt = "你是一个AI助手";
+            systemPrompt = SessionConstants.AI_BOT_DEFAULT_PROMPT;
         }
 
         String response = chatClient.prompt()
@@ -244,7 +245,7 @@ public class AIBotService {
         // 使用机器人的系统提示词
         String systemPrompt = bot.getSystemPrompt();
         if (systemPrompt == null || systemPrompt.trim().isEmpty()) {
-            systemPrompt = "你是一个AI助手";
+            systemPrompt = SessionConstants.AI_BOT_DEFAULT_PROMPT;
         }
 
         return chatClient.prompt()

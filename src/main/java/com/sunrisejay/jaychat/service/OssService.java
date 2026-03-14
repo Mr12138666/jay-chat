@@ -31,9 +31,42 @@ public class OssService {
     private static final int AVATAR_MIN_SIZE = 128;
 
     private final OssProperties ossProperties;
+    // 缓存OSS客户端，避免重复创建
+    private OSS ossClient;
 
     public OssService(OssProperties ossProperties) {
         this.ossProperties = ossProperties;
+    }
+
+    /**
+     * 获取OSS客户端（单例模式）
+     */
+    private synchronized OSS getOssClient() {
+        if (ossClient == null) {
+            ossClient = new OSSClientBuilder().build(
+                    ossProperties.getEndpoint(),
+                    ossProperties.getAccessKeyId(),
+                    ossProperties.getAccessKeySecret()
+            );
+        }
+        return ossClient;
+    }
+
+    /**
+     * 验证文件基本参数
+     */
+    private void validateFile(MultipartFile file) {
+        if (file == null || file.isEmpty()) {
+            throw new BusinessException("文件不能为空");
+        }
+        String originalFilename = file.getOriginalFilename();
+        if (originalFilename == null) {
+            throw new BusinessException("文件名不能为空");
+        }
+        String fileExtension = getFileExtension(originalFilename);
+        if (!isImageFile(fileExtension)) {
+            throw new BusinessException("只支持图片格式：jpg, jpeg, png, gif, webp");
+        }
     }
 
     /**
@@ -43,28 +76,14 @@ public class OssService {
      * @return 图片访问URL
      */
     public String uploadChatImage(MultipartFile file, Long userId) {
-        if (file == null || file.isEmpty()) {
-            throw new BusinessException("文件不能为空");
-        }
-
-        // 验证文件类型（只允许图片）
-        String originalFilename = file.getOriginalFilename();
-        if (originalFilename == null) {
-            throw new BusinessException("文件名不能为空");
-        }
-
-        String fileExtension = getFileExtension(originalFilename);
-        if (!isImageFile(fileExtension)) {
-            throw new BusinessException("只支持图片格式：jpg, jpeg, png, gif, webp");
-        }
+        // 验证文件基本参数
+        validateFile(file);
 
         // 验证文件大小（限制20MB，聊天图片可以比头像大）
-        long fileSize = file.getSize();
-        if (fileSize > 20 * 1024 * 1024) {
+        if (file.getSize() > 20 * 1024 * 1024) {
             throw new BusinessException("图片大小不能超过20MB");
         }
 
-        OSS ossClient = null;
         try {
             // 验证是否为有效图片
             BufferedImage sourceImage = ImageIO.read(file.getInputStream());
@@ -72,16 +91,13 @@ public class OssService {
                 throw new BusinessException("文件内容不是有效图片");
             }
 
-            // 创建OSS客户端
-            ossClient = new OSSClientBuilder().build(
-                    ossProperties.getEndpoint(),
-                    ossProperties.getAccessKeyId(),
-                    ossProperties.getAccessKeySecret()
-            );
-
+            String fileExtension = getFileExtension(file.getOriginalFilename());
             // 生成文件名，使用 chat/ 前缀区分聊天图片
             String fileName = generateChatImageFileName(userId, fileExtension);
             String objectName = "chat/" + fileName;
+
+            // 使用单例客户端上传
+            OSS client = getOssClient();
 
             // 上传原图（不裁剪，不压缩）
             ObjectMetadata metadata = new ObjectMetadata();
@@ -94,7 +110,7 @@ public class OssService {
                     file.getInputStream()
             );
             putObjectRequest.setMetadata(metadata);
-            ossClient.putObject(putObjectRequest);
+            client.putObject(putObjectRequest);
 
             String fileUrl = ossProperties.getDomain() + "/" + objectName;
             logger.info("聊天图片上传成功: userId={}, objectName={}", userId, objectName);
@@ -104,11 +120,7 @@ public class OssService {
             throw e;
         } catch (Exception e) {
             logger.error("聊天图片上传失败: userId={}", userId, e);
-            throw new BusinessException("图片上传失败: " + e.getMessage());
-        } finally {
-            if (ossClient != null) {
-                ossClient.shutdown();
-            }
+            throw new BusinessException("图片上传失败，请稍后重试");
         }
     }
 
@@ -119,28 +131,14 @@ public class OssService {
      * @return 文件访问URL
      */
     public String uploadFile(MultipartFile file, Long userId) {
-        if (file == null || file.isEmpty()) {
-            throw new BusinessException("文件不能为空");
-        }
-
-        // 验证文件类型（只允许图片）
-        String originalFilename = file.getOriginalFilename();
-        if (originalFilename == null) {
-            throw new BusinessException("文件名不能为空");
-        }
-
-        String fileExtension = getFileExtension(originalFilename);
-        if (!isImageFile(fileExtension)) {
-            throw new BusinessException("只支持图片格式：jpg, jpeg, png, gif, webp");
-        }
+        // 验证文件基本参数
+        validateFile(file);
 
         // 验证文件大小（限制5MB）
-        long fileSize = file.getSize();
-        if (fileSize > 5 * 1024 * 1024) {
+        if (file.getSize() > 5 * 1024 * 1024) {
             throw new BusinessException("文件大小不能超过5MB");
         }
 
-        OSS ossClient = null;
         try {
             BufferedImage sourceImage = ImageIO.read(file.getInputStream());
             if (sourceImage == null) {
@@ -150,20 +148,16 @@ public class OssService {
                 throw new BusinessException("头像分辨率过低，至少需要 " + AVATAR_MIN_SIZE + "x" + AVATAR_MIN_SIZE);
             }
 
-            // 创建OSS客户端
-            ossClient = new OSSClientBuilder().build(
-                    ossProperties.getEndpoint(),
-                    ossProperties.getAccessKeyId(),
-                    ossProperties.getAccessKeySecret()
-            );
+            // 使用单例客户端
+            OSS client = getOssClient();
 
             // 统一生成方形头像的两个尺寸，默认返回高清版本URL
             String fileName = generateFileName(userId);
             String smallObjectName = ossProperties.getPathPrefix() + fileName + "_" + AVATAR_SIZE_SMALL + ".jpg";
             String largeObjectName = ossProperties.getPathPrefix() + fileName + "_" + AVATAR_SIZE_LARGE + ".jpg";
 
-            uploadResizedImage(ossClient, sourceImage, smallObjectName, AVATAR_SIZE_SMALL);
-            uploadResizedImage(ossClient, sourceImage, largeObjectName, AVATAR_SIZE_LARGE);
+            uploadResizedImage(client, sourceImage, smallObjectName, AVATAR_SIZE_SMALL);
+            uploadResizedImage(client, sourceImage, largeObjectName, AVATAR_SIZE_LARGE);
 
             String fileUrl = ossProperties.getDomain() + "/" + largeObjectName;
             logger.info("头像上传成功: userId={}, small={}, large={}", userId, smallObjectName, largeObjectName);
@@ -173,11 +167,7 @@ public class OssService {
             throw e;
         } catch (Exception e) {
             logger.error("文件上传失败: userId={}", userId, e);
-            throw new BusinessException("文件上传失败: " + e.getMessage());
-        } finally {
-            if (ossClient != null) {
-                ossClient.shutdown();
-            }
+            throw new BusinessException("文件上传失败，请稍后重试");
         }
     }
 
@@ -197,17 +187,13 @@ public class OssService {
             return;
         }
 
-        OSS ossClient = null;
         try {
-            ossClient = new OSSClientBuilder().build(
-                    ossProperties.getEndpoint(),
-                    ossProperties.getAccessKeyId(),
-                    ossProperties.getAccessKeySecret()
-            );
+            // 使用单例客户端
+            OSS client = getOssClient();
 
             // 删除当前头像对象
             try {
-                ossClient.deleteObject(ossProperties.getBucketName(), objectName);
+                client.deleteObject(ossProperties.getBucketName(), objectName);
                 logger.info("文件删除成功: objectName={}", objectName);
             } catch (Exception e) {
                 logger.warn("文件删除失败: objectName={}", objectName, e);
@@ -217,7 +203,7 @@ public class OssService {
             if (objectName.endsWith("_" + AVATAR_SIZE_SMALL + ".jpg")) {
                 String other = objectName.replace("_" + AVATAR_SIZE_SMALL + ".jpg", "_" + AVATAR_SIZE_LARGE + ".jpg");
                 try {
-                    ossClient.deleteObject(ossProperties.getBucketName(), other);
+                    client.deleteObject(ossProperties.getBucketName(), other);
                     logger.info("文件删除成功: objectName={}", other);
                 } catch (Exception e) {
                     logger.warn("文件删除失败: objectName={}", other, e);
@@ -225,7 +211,7 @@ public class OssService {
             } else if (objectName.endsWith("_" + AVATAR_SIZE_LARGE + ".jpg")) {
                 String other = objectName.replace("_" + AVATAR_SIZE_LARGE + ".jpg", "_" + AVATAR_SIZE_SMALL + ".jpg");
                 try {
-                    ossClient.deleteObject(ossProperties.getBucketName(), other);
+                    client.deleteObject(ossProperties.getBucketName(), other);
                     logger.info("文件删除成功: objectName={}", other);
                 } catch (Exception e) {
                     logger.warn("文件删除失败: objectName={}", other, e);
@@ -233,10 +219,6 @@ public class OssService {
             }
         } catch (Exception e) {
             logger.error("文件删除失败: objectName={}", objectName, e);
-        } finally {
-            if (ossClient != null) {
-                ossClient.shutdown();
-            }
         }
     }
 

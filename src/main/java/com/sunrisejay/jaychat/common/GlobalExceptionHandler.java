@@ -90,8 +90,8 @@ public class GlobalExceptionHandler {
     @ExceptionHandler(RuntimeException.class)
     @ResponseStatus(HttpStatus.INTERNAL_SERVER_ERROR)
     public ApiResponse<Void> handleRuntimeException(RuntimeException e) {
-        logger.error("运行时异常", e);
-        return ApiResponse.error(500, "服务器内部错误: " + e.getMessage());
+        logger.error("运行时异常: {}", e.getMessage(), e);
+        return ApiResponse.error(500, "服务器内部错误，请稍后重试");
     }
 
     /**

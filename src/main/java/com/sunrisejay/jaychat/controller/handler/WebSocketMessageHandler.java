@@ -116,7 +116,7 @@ public class WebSocketMessageHandler {
                             finalBuffer.append(chunk);
                         }
                     },
-                    error -> logger.error("机器人回复出错: botId={}, requestId={}, error={}", bot.getId(), requestId, error.getMessage()),
+                    error -> logger.error("机器人回复出错: botId={}, requestId={}, error={}", bot.getId(), requestId, error.getMessage(), error),
                     () -> {
                         // 流式输出完成
                         Map<String, Object> botMessageComplete = Map.of(

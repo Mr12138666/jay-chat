@@ -144,7 +144,7 @@ public class ChatService {
         message.setSenderId(botId);
         message.setBotId(botId);
         message.setContent(content);
-        message.setContentType("text");
+        message.setContentType(SessionConstants.CONTENT_TYPE_TEXT);
         message.setReplyToId(null);
         messageMapper.insert(message);
 
@@ -270,7 +270,7 @@ public class ChatService {
             throw e;
         } catch (Exception e) {
             logger.error("获取或创建默认会话失败: userId={}", userId, e);
-            throw new BusinessException("获取或创建默认会话失败: " + e.getMessage());
+            throw new BusinessException("获取或创建默认会话失败，请稍后重试");
         }
     }
     
@@ -391,12 +391,18 @@ public class ChatService {
         }
 
         List<Long> memberIds = memberMapper.selectUserIdsBySessionId(sessionId);
-        for (Long memberId : memberIds) {
-            if (!memberId.equals(currentUserId)) {
-                return userMapper.selectById(memberId);
-            }
+        // 收集除当前用户外的其他成员ID
+        List<Long> otherMemberIds = memberIds.stream()
+                .filter(id -> !id.equals(currentUserId))
+                .collect(Collectors.toList());
+
+        if (otherMemberIds.isEmpty()) {
+            return null;
         }
-        return null;
+
+        // 批量查询其他成员
+        List<User> users = userMapper.selectByIds(otherMemberIds);
+        return users.isEmpty() ? null : users.get(0);
     }
 
     /**
@@ -521,9 +527,14 @@ public class ChatService {
             throw new BusinessException("您不在该群聊中");
         }
 
+        // 批量查询已在群中的成员ID
+        List<Long> existingMemberIds = memberMapper.selectUserIdsBySessionId(sessionId);
+        Set<Long> existingMemberIdSet = existingMemberIds.stream()
+                .collect(Collectors.toSet());
+
         // 添加新成员
         for (Long userId : targetUserIds) {
-            if (!memberMapper.exists(sessionId, userId)) {
+            if (!existingMemberIdSet.contains(userId)) {
                 memberMapper.insert(sessionId, userId);
                 logger.info("邀请成员入群: sessionId={}, inviterId={}, targetUserId={}", sessionId, inviterId, userId);
             }

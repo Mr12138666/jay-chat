@@ -510,5 +510,34 @@ const handleKeydown = (event: KeyboardEvent) => {
   color: #667eea;
   font-weight: 700;
 }
+
+/* 手机端输入区域自适应 */
+@media (max-width: 768px) {
+  .chat-input {
+    padding: 12px 12px;
+  }
+
+  .input-row {
+    gap: 8px;
+  }
+
+  .image-btn,
+  .emoji-btn {
+    width: 36px;
+    height: 36px;
+    font-size: 16px;
+  }
+
+  .message-input {
+    padding: 10px 12px;
+    font-size: 14px;
+  }
+
+  .send-btn {
+    padding: 8px 12px;
+    font-size: 13px;
+    min-width: 50px;
+  }
+}
 </style>
 

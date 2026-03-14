@@ -1,0 +1,33 @@
+# ============================================
+# 本地开发配置（此文件推送到GitHub）
+# ============================================
+# 使用说明：此配置用于本地开发环境
+# 生产环境请使用 application-prod.yml（不推送到GitHub）
+
+spring:
+  # 数据源配置
+  datasource:
+    url: jdbc:mysql://localhost:3306/jay_chat?useSSL=false&serverTimezone=UTC&characterEncoding=utf8&allowPublicKeyRetrieval=true
+    username: root
+    password: your_password
+    driver-class-name: com.mysql.cj.jdbc.Driver
+  ai:
+    deepseek:
+      api-key: your-api-key
+      base-url: https://api.deepseek.com
+      chat:
+        options:
+          model: deepseek-chat
+          temperature: 0.8
+
+# ============================================
+# 阿里云 OSS 配置（本地开发通常不需要）
+# ============================================
+aliyun:
+  oss:
+    endpoint: https://oss-cn-beijing.aliyuncs.com
+    access-key-id: your-access-key-id
+    access-key-secret: your-access-key-secret
+    bucket-name: your-bucket-name
+    domain: https://your-domain.oss-cn-beijing.aliyuncs.com
+    path-prefix: avatar/

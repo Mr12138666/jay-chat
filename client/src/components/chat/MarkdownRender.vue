@@ -123,6 +123,8 @@ watch(
   word-wrap: break-word;
   line-height: 1.5;
   min-width: 100px;
+  max-width: 100%;
+  overflow-x: hidden;
 }
 
 .markdown-content :deep(p) {
@@ -258,5 +260,34 @@ watch(
 
 .markdown-content :deep(th) {
   background: rgba(255, 255, 255, 0.1);
+}
+
+/* 手机端代码块自适应 */
+@media (max-width: 768px) {
+  .markdown-content :deep(.code-block-wrapper) {
+    max-width: 100%;
+    width: 100%;
+    overflow-x: hidden;
+    box-sizing: border-box;
+  }
+
+  .markdown-content :deep(.code-content) {
+    overflow-x: auto;
+    max-width: 100%;
+    box-sizing: border-box;
+  }
+
+  .markdown-content :deep(pre) {
+    max-width: 100%;
+    overflow-x: auto;
+    box-sizing: border-box;
+  }
+
+  .markdown-content :deep(pre code) {
+    max-width: 100%;
+    white-space: pre;
+    overflow-x: auto;
+    box-sizing: border-box;
+  }
 }
 </style>

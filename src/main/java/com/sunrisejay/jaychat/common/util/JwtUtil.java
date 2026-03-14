@@ -80,7 +80,7 @@ public class JwtUtil {
             Claims claims = parseClaims(token);
             return claims.get("uid", Long.class);
         } catch (Exception e) {
-            logger.warn("解析JWT Token失败", e);
+            logger.warn("解析JWT Token失败: {}", e.getMessage());
             return null;
         }
     }
@@ -98,7 +98,7 @@ public class JwtUtil {
             Claims claims = parseClaims(token);
             return claims.get("username", String.class);
         } catch (Exception e) {
-            logger.warn("解析JWT Token失败", e);
+            logger.warn("解析JWT Token失败: {}", e.getMessage());
             return null;
         }
     }
@@ -115,7 +115,7 @@ public class JwtUtil {
         try {
             return parseClaims(token);
         } catch (Exception e) {
-            logger.warn("解析JWT Token失败", e);
+            logger.warn("解析JWT Token失败: {}", e.getMessage());
             return null;
         }
     }

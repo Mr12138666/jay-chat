@@ -128,6 +128,51 @@ const emit = defineEmits<{
 @media (max-width: 768px) {
   .message {
     max-width: 85%;
+    gap: 8px;
+  }
+
+  .message-avatar {
+    width: 32px;
+    height: 32px;
+  }
+
+  .avatar-placeholder {
+    font-size: 12px;
+  }
+
+  .message-body {
+    gap: 4px;
+  }
+
+  .message-meta {
+    gap: 6px;
+  }
+
+  .sender {
+    font-size: 12px;
+  }
+
+  .time {
+    font-size: 10px;
+  }
+
+  .message-content {
+    padding: 8px 12px;
+    font-size: 13px;
+    min-width: 40px;
+  }
+
+  .reply-quote {
+    padding: 6px 10px;
+  }
+
+  .reply-quote-label {
+    font-size: 10px;
+  }
+
+  .reply-quote-content {
+    font-size: 11px;
+    max-width: 200px;
   }
 }
 
@@ -378,16 +423,29 @@ const emit = defineEmits<{
   }
 }
 
+/* 手机端机器人消息自适应 */
+@media (max-width: 768px) {
+  .message.bot-message {
+    max-width: 85%;
+  }
+
+  .message.bot-message .message-content {
+    max-width: 100%;
+    width: auto;
+    overflow-x: hidden;
+  }
+}
+
 /* 机器人消息样式 */
 .message.bot-message .message-content {
   background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
   color: white;
   border-bottom-left-radius: 6px;
   border: none;
-  max-width: calc(100% - 100px);
-  max-width: 600px;
+  max-width: calc(100vw - 100px);
   padding: 12px 16px;
   min-width: 80px;
+  box-sizing: border-box;
 }
 
 @media (min-width: 769px) {
